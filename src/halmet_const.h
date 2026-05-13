@@ -1,0 +1,61 @@
+#ifndef HALMET_SRC_HALMET_CONST_H_
+#define HALMET_SRC_HALMET_CONST_H_
+
+#include <Arduino.h>
+
+namespace sensesp {
+
+// on fridge board
+//#define ONEWIRE_PIN 13
+// on SH-ESP32
+//#define ONEWIRE_PIN 4
+// on achtern02 hardware
+#define ONEWIRE_PIN 13
+
+// I2C pins on HALMET.
+    // const int kSDAPin = 21;
+    // const int kSCLPin = 22;
+
+// I2C pins on TTGO.
+    // const int kSDAPin = 21;
+    // const int kSCLPin = 22;
+
+// I2C pins on SH_ENGINE_HAT.
+    // const int kSDAPin = 16;
+    // const int kSCLPin = 17;
+
+// I2C pins on achtern02 hardware.
+    const int kSDAPin = 21;
+    const int kSCLPin = 22;
+
+// ADS1115 I2C address
+const int kADS1115Address = 0x4b;
+
+// CAN bus (NMEA 2000) pins on HALMET
+//const gpio_num_t kCANRxPin = GPIO_NUM_18;
+//const gpio_num_t kCANTxPin = GPIO_NUM_19;
+
+// CAN bus (NMEA 2000) pins on ESP-A
+//const gpio_num_t kCANRxPin = GPIO_NUM_4;
+//const gpio_num_t kCANTxPin = GPIO_NUM_5;
+
+// CAN bus (NMEA 2000) pins
+const gpio_num_t kCANRxPin = GPIO_NUM_4;
+const gpio_num_t kCANTxPin = GPIO_NUM_5;
+
+// Engine hat digital input pins
+const int kDigitalInputPin1 = GPIO_NUM_15;
+const int kDigitalInputPin2 = GPIO_NUM_13;
+const int kDigitalInputPin3 = GPIO_NUM_14;
+const int kDigitalInputPin4 = GPIO_NUM_12;
+
+// HALMET digital input pins
+//const int kDigitalInputPin1 = GPIO_NUM_23;
+//const int kDigitalInputPin2 = GPIO_NUM_25;
+//const int kDigitalInputPin3 = GPIO_NUM_27;
+//const int kDigitalInputPin4 = GPIO_NUM_26;
+
+
+}  // namespace sensesp
+
+#endif /* HALMET_SRC_HALMET_CONST_H_ */
