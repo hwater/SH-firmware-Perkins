@@ -9,8 +9,8 @@ namespace sensesp {
 //#define ONEWIRE_PIN 13
 // on SH-ESP32
 //#define ONEWIRE_PIN 4
-// on achtern02 hardware
-#define ONEWIRE_PIN 13
+// 1-Wire bus is hardwired to GPIO 4 on the SH-ESP32.
+#define ONEWIRE_PIN 4
 
 // I2C pins on HALMET.
     // const int kSDAPin = 21;
@@ -35,7 +35,8 @@ const int kADS1115Address = 0x4b;
 //const gpio_num_t kCANRxPin = GPIO_NUM_4;
 //const gpio_num_t kCANTxPin = GPIO_NUM_5;
 
-// CAN bus (NMEA 2000) pins on SH-ESP32 Engine Hat
+// CAN bus (NMEA 2000) pins on SH-ESP32 Engine Hat (onboard transceiver).
+// GPIO 34 is input-only -> Rx; GPIO 32 (output-capable) -> Tx.
 const gpio_num_t kCANRxPin = GPIO_NUM_34;
 const gpio_num_t kCANTxPin = GPIO_NUM_32;
 

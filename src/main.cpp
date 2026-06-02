@@ -16,7 +16,8 @@
 #define ESP32_CAN_RX_PIN GPIO_NUM_34
 
 #ifdef ENABLE_NMEA2000_OUTPUT
-#include "Nmea2kTwai.h"
+#include "NMEA2000_esp32.h"
+#include "ESP32_CAN_def.h"  // MODULE_CAN SJA1000 register access for diagnostics
 #endif
 
 #include "n2k_senders.h"
@@ -33,6 +34,7 @@
 
 #ifdef ENABLE_SIGNALK
 #include "sensesp_app_builder.h"
+#include "secrets.h"  // AP_SSID, AP_PASS, OTA_PASSWORD (gitignored)
 #define BUILDER_CLASS SensESPAppBuilder
 #else
 #include "sensesp_minimal_app_builder.h"
@@ -111,9 +113,40 @@ static int log_vprintf(const char* fmt, va_list args) {
 }
 
 #ifdef ENABLE_NMEA2000_OUTPUT
-Nmea2kTwai* nmea2000;
+// SensESP's N2K senders transmit internally, so there is no SendMsg call site to
+// count TX packets at (as achtern02 does). This thin subclass tallies sent CAN
+// frames at the driver level so the status page can show a TX packet count.
+class CountingN2k : public tNMEA2000_esp32 {
+ public:
+  using tNMEA2000_esp32::tNMEA2000_esp32;
+  uint32_t tx_frames = 0;
+
+ protected:
+  bool CANSendFrame(unsigned long id, unsigned char len,
+                    const unsigned char* buf, bool wait_sent = true) override {
+    bool ok = tNMEA2000_esp32::CANSendFrame(id, len, buf, wait_sent);
+    if (ok) tx_frames++;
+    return ok;
+  }
+};
+
+CountingN2k* nmea2000;
 elapsedMillis n2k_time_since_rx = 0;
 elapsedMillis n2k_time_since_tx = 0;
+// Received-message counter, fed by a tNMEA2000 message handler (achtern02 style).
+uint32_t g_can_rx_pkts = 0;
+// BUS_OFF auto-recovery bookkeeping at the SJA1000 register level (achtern02 style).
+uint32_t g_can_recoveries = 0;
+uint32_t g_can_last_recovery_ms = 0;
+
+// CAN controller state read straight from the SJA1000 status register.
+// NMEA2000_esp32 bypasses the IDF TWAI driver, so there is no getStatus().
+inline const char* CanStateStr() {
+  uint32_t sr = MODULE_CAN->SR.U;
+  if ((sr >> 7) & 1) return "bus_off";    // bus-off
+  if ((sr >> 6) & 1) return "err_warn";   // error status (passive/warn)
+  return "running";
+}
 #endif
 
 TwoWire* i2c;
@@ -167,13 +200,10 @@ static void disp_draw(Adafruit_SSD1306* d) {
   } else {
     // Page 2: CAN + SK + network (rows 2-7)
 #ifdef ENABLE_NMEA2000_OUTPUT
-    auto st = nmea2000->getStatus();
-    const char* can_s =
-      st.state == Nmea2kTwai::ST_RUNNING    ? "running" :
-      st.state == Nmea2kTwai::ST_BUS_OFF   ? "bus-off" :
-      st.state == Nmea2kTwai::ST_RECOVERING ? "recover" : "error";
-    disp_row(d, 2, "CAN %s", can_s);
-    disp_row(d, 3, "TXe%lu RXe%lu", st.tx_errors, st.rx_errors);
+    disp_row(d, 2, "CAN %s", CanStateStr());
+    disp_row(d, 3, "TXe%lu RXe%lu",
+             (unsigned long)MODULE_CAN->TXERR.B.TXERR,
+             (unsigned long)MODULE_CAN->RXERR.B.RXERR);
     uint8_t src = nmea2000->GetN2kSource();
     if (src != 255) disp_row(d, 4, "N2K addr %d", src);
     else            disp_row(d, 4, "N2K claim..");
@@ -245,8 +275,8 @@ void setup() {
   // Boot den gespeicherten Hostnamen überschreiben. Stattdessen nur beim
   // ersten Boot setzen, wenn noch der SensESP-Default gilt.
   sensesp_app = (&builder)
-                    ->set_wifi_access_point("PERKINS", "Sensorik2000")
-                    ->enable_ota("nurichallein2000!")
+                    ->set_wifi_access_point(AP_SSID, AP_PASS)
+                    ->enable_ota(OTA_PASSWORD)
                     ->get_app();
 
   if (SensESPBaseApp::get_hostname() == "SensESP") {
@@ -346,7 +376,7 @@ void setup() {
   /////////////////////////////////////////////////////////////////////
   // Initialize NMEA 2000 functionality
 
-  nmea2000 = new Nmea2kTwai(kCANTxPin, kCANRxPin, 200);
+  nmea2000 = new CountingN2k(kCANTxPin, kCANRxPin);
 
   // Reserve enough buffer for sending all messages.
   nmea2000->SetN2kCANSendFrameBufSize(250);
@@ -384,27 +414,40 @@ void setup() {
   nmea2000->EnableForward(false);
   nmea2000->Open();
 
-  // loop() handles bus-off recovery; ParseMessages() drives address claiming
-  // and processes received N2K frames — 10ms is fine for NMEA2000.
-  event_loop()->onRepeat(10, []() {
-    nmea2000->loop();
-    nmea2000->ParseMessages();
-  });
+  // Count received N2K messages (achtern02 style: tNMEA2000 message handler,
+  // not a driver-level hook). Captureless lambda -> function pointer.
+  nmea2000->SetMsgHandler([](const tN2kMsg&) { g_can_rx_pkts++; });
 
-  // CAN diagnostics via TWAI driver status
-  auto* n2k_state_sensor = new RepeatSensor<String>(2000, []() -> String {
-    switch (nmea2000->getStatus().state) {
-      case Nmea2kTwai::ST_RUNNING:    return "running";
-      case Nmea2kTwai::ST_BUS_OFF:    return "bus_off";
-      case Nmea2kTwai::ST_RECOVERING: return "recover";
-      default:                        return "error";
+  // ParseMessages() drives address claiming and processes received N2K frames.
+  event_loop()->onRepeat(10, []() { nmea2000->ParseMessages(); });
+
+  // BUS_OFF auto-recovery (achtern02 style): on bus-off the SJA1000 enters reset
+  // mode; writing MOD.RM=0 restarts the recovery sequence so the controller
+  // rejoins the bus. NMEA2000_esp32 does not do this on its own.
+  event_loop()->onRepeat(5000, []() {
+    if (MODULE_CAN->SR.B.BS) {
+      uint32_t now = millis();
+      if (now - g_can_last_recovery_ms < 5000) return;
+      g_can_last_recovery_ms = now;
+      g_can_recoveries++;
+      MODULE_CAN->MOD.B.RM = 1;
+      MODULE_CAN->TXERR.U  = 0;
+      MODULE_CAN->RXERR.U  = 0;
+      (void)MODULE_CAN->ECC;
+      (void)MODULE_CAN->IR.U;
+      MODULE_CAN->MOD.B.RM = 0;
     }
   });
+
+  // CAN diagnostics via SJA1000 status/error registers.
+  auto* n2k_state_sensor = new RepeatSensor<String>(2000, []() -> String {
+    return String(CanStateStr());
+  });
   auto* n2k_txerr_sensor = new RepeatSensor<float>(2000, []() -> float {
-    return (float)nmea2000->getStatus().tx_errors;
+    return (float)MODULE_CAN->TXERR.B.TXERR;
   });
   auto* n2k_rxerr_sensor = new RepeatSensor<float>(2000, []() -> float {
-    return (float)nmea2000->getStatus().rx_errors;
+    return (float)MODULE_CAN->RXERR.B.RXERR;
   });
   n2k_state_sensor->connect_to(
       new SKOutputString("diagnostics.n2k.state", "/diagnostics/n2k/state"));
@@ -412,6 +455,27 @@ void setup() {
       new SKOutputFloat("diagnostics.n2k.txErrCnt", "/diagnostics/n2k/txErrCnt"));
   n2k_rxerr_sensor->connect_to(
       new SKOutputFloat("diagnostics.n2k.rxErrCnt", "/diagnostics/n2k/rxErrCnt"));
+
+  // CAN-bus status on the web UI status page (group "CAN-Bus"), like achtern02.
+  auto* st_can_state = new StatusPageItem<String>("Status", "unbekannt", "CAN-Bus", 100);
+  auto* st_n2k_addr  = new StatusPageItem<uint8_t>("N2K-Adresse", 0, "CAN-Bus", 110);
+  auto* st_can_txpkt = new StatusPageItem<uint32_t>("TX Pakete", 0, "CAN-Bus", 120);
+  auto* st_can_rxpkt = new StatusPageItem<uint32_t>("RX Pakete", 0, "CAN-Bus", 130);
+  auto* st_can_txerr = new StatusPageItem<uint32_t>("TX Fehler", 0, "CAN-Bus", 140);
+  auto* st_can_rxerr = new StatusPageItem<uint32_t>("RX Fehler", 0, "CAN-Bus", 150);
+  auto* st_can_recov = new StatusPageItem<uint32_t>("Recoveries", 0, "CAN-Bus", 160);
+
+  event_loop()->onRepeat(1000, [st_can_state, st_n2k_addr, st_can_txpkt,
+                                st_can_rxpkt, st_can_txerr, st_can_rxerr,
+                                st_can_recov]() {
+    st_can_state->set(String(CanStateStr()));
+    st_n2k_addr->set(nmea2000->GetN2kSource());
+    st_can_txpkt->set(nmea2000->tx_frames);
+    st_can_rxpkt->set(g_can_rx_pkts);
+    st_can_txerr->set((uint32_t)MODULE_CAN->TXERR.B.TXERR);
+    st_can_rxerr->set((uint32_t)MODULE_CAN->RXERR.B.RXERR);
+    st_can_recov->set(g_can_recoveries);
+  });
 #endif  // ENABLE_NMEA2000_OUTPUT
 
 #ifndef ENABLE_SIGNALK

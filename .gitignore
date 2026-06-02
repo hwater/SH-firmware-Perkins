@@ -3,3 +3,8 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# Credentials — never commit
+src/secrets.h
+secrets.ini
+.DS_Store
