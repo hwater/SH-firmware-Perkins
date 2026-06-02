@@ -284,8 +284,9 @@ static String BuildDataJson() {
   snprintf(b, sizeof(b), "\"hostname\":\"%s\",\"uptime_s\":%lu,", g_hostname,
            (unsigned long)(millis() / 1000));
   s += b;
-  snprintf(b, sizeof(b), "\"rpm\":%.0f,\"fuel_lph\":%.2f,", disp_rpm,
-           g_fuel_lph);
+  float rpm_v = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
+  float fuel_v = (isnan(g_fuel_lph) || isinf(g_fuel_lph)) ? 0.0f : g_fuel_lph;
+  snprintf(b, sizeof(b), "\"rpm\":%.0f,\"fuel_lph\":%.2f,", rpm_v, fuel_v);
   s += b;
   if (disp_coolant > -200) {
     snprintf(b, sizeof(b), "\"coolant_c\":%.1f,", disp_coolant);
@@ -846,11 +847,18 @@ void setup() {
       ->set_sort_order(3020);
   fuel_flow_hz->connect_to(fuel_flow_lph);
 
+  // Sanitize the curve output: it can be NaN before the first valid reading,
+  // which would poison the N2K fuel rate and make /api/data invalid JSON.
+  auto* fuel_flow_clean = new LambdaTransform<float, float>([](float lph) -> float {
+    return (isnan(lph) || isinf(lph)) ? 0.0f : lph;
+  });
+  fuel_flow_lph->connect_to(fuel_flow_clean);
+
 #ifdef ENABLE_NMEA2000_OUTPUT
   // PGN 127489 fuel rate is in L/h (float -> double for the sender).
   auto* fuel_lph_to_double = new LambdaTransform<float, double>(
       [](float lph) -> double { return (double)lph; });
-  fuel_flow_lph->connect_to(fuel_lph_to_double);
+  fuel_flow_clean->connect_to(fuel_lph_to_double);
   fuel_lph_to_double->connect_to(engine_dynamic_sender->fuel_rate_);
 #endif
 
@@ -858,7 +866,7 @@ void setup() {
   // Signal K fuel rate is in m^3/s: L/h / 3.6e6.
   auto* fuel_flow_m3s = new LambdaTransform<float, float>(
       [](float lph) -> float { return lph / 3.6e6f; });
-  fuel_flow_lph->connect_to(fuel_flow_m3s);
+  fuel_flow_clean->connect_to(fuel_flow_m3s);
   fuel_flow_m3s->connect_to(
       new SKOutputFloat("propulsion.main.fuel.rate", "/Fuel Flow/SK Path"));
 #endif
@@ -1003,7 +1011,7 @@ void setup() {
   }
 
   // Keep the latest fuel rate available for the /api/data endpoint.
-  fuel_flow_lph->connect_to(
+  fuel_flow_clean->connect_to(
       new LambdaConsumer<float>([](float lph) { g_fuel_lph = lph; }));
 
   // Custom live-data JSON endpoint on the SensESP web server: GET /api/data
