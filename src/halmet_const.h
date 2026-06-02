@@ -20,13 +20,9 @@ namespace sensesp {
     // const int kSDAPin = 21;
     // const int kSCLPin = 22;
 
-// I2C pins on SH_ENGINE_HAT.
-    // const int kSDAPin = 16;
-    // const int kSCLPin = 17;
-
-// I2C pins on achtern02 hardware.
-    const int kSDAPin = 21;
-    const int kSCLPin = 22;
+// I2C pins on SH-ESP32 Engine Hat.
+    const int kSDAPin = 16;
+    const int kSCLPin = 17;
 
 // ADS1115 I2C address
 const int kADS1115Address = 0x4b;
@@ -39,9 +35,9 @@ const int kADS1115Address = 0x4b;
 //const gpio_num_t kCANRxPin = GPIO_NUM_4;
 //const gpio_num_t kCANTxPin = GPIO_NUM_5;
 
-// CAN bus (NMEA 2000) pins
-const gpio_num_t kCANRxPin = GPIO_NUM_4;
-const gpio_num_t kCANTxPin = GPIO_NUM_5;
+// CAN bus (NMEA 2000) pins on SH-ESP32 Engine Hat
+const gpio_num_t kCANRxPin = GPIO_NUM_34;
+const gpio_num_t kCANTxPin = GPIO_NUM_32;
 
 // Engine hat digital input pins
 const int kDigitalInputPin1 = GPIO_NUM_15;

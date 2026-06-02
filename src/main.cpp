@@ -12,8 +12,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define ESP32_CAN_TX_PIN GPIO_NUM_5
-#define ESP32_CAN_RX_PIN GPIO_NUM_4
+#define ESP32_CAN_TX_PIN GPIO_NUM_32
+#define ESP32_CAN_RX_PIN GPIO_NUM_34
 
 #ifdef ENABLE_NMEA2000_OUTPUT
 #include "Nmea2kTwai.h"
@@ -81,6 +81,34 @@ SystemStatusLed* system_status_led;
 
 /////////////////////////////////////////////////////////////////////
 // Declare some global variables required for the firmware operation.
+
+// TCP log server — connect with: pio device monitor --port socket://10.0.1.89:23
+static WiFiServer      log_server(23);
+static WiFiClient      log_client;
+static bool            log_server_started = false;
+static vprintf_like_t  orig_log_vprintf   = nullptr;
+
+static int log_vprintf(const char* fmt, va_list args) {
+  // Copy args before the first consumer exhausts them
+  va_list args_tcp;
+  va_copy(args_tcp, args);
+
+  // UART output via the original handler
+  int len = orig_log_vprintf ? orig_log_vprintf(fmt, args) : vprintf(fmt, args);
+
+  // TCP output to connected client
+  if (log_client && log_client.connected()) {
+    char buf[512];
+    int n = vsnprintf(buf, sizeof(buf) - 1, fmt, args_tcp);
+    if (n > 0) {
+      log_client.write(reinterpret_cast<const uint8_t*>(buf), n);
+      log_client.flush();
+    }
+  }
+
+  va_end(args_tcp);
+  return len;
+}
 
 #ifdef ENABLE_NMEA2000_OUTPUT
 Nmea2kTwai* nmea2000;
@@ -191,7 +219,7 @@ const adsGain_t kADS1115Gain = GAIN_ONE;
 // be used to test that the frequency counter functionality is working.
 #define ENABLE_TEST_OUTPUT_PIN
 #ifdef ENABLE_TEST_OUTPUT_PIN
-const int kTestOutputPin = GPIO_NUM_33;
+const int kTestOutputPin = GPIO_NUM_18;
 // With the default pulse rate of 100 pulses per revolution (configured in
 // halmet_digital.cpp), this frequency corresponds to 3.8 r/s or about 228 rpm.
 const int kTestOutputFrequency = 380;
@@ -201,6 +229,7 @@ const int kTestOutputFrequency = 380;
 // The setup function performs one-time application initialization.
 void setup() {
   SetupLogging(ESP_LOG_DEBUG);
+  orig_log_vprintf = esp_log_set_vprintf(log_vprintf);
 
   // These calls can be used for fine-grained control over the logging level.
   // esp_log_level_set("*", esp_log_level_t::ESP_LOG_DEBUG);
@@ -244,9 +273,55 @@ void setup() {
     }
   });
 
+  // Start TCP log server once WiFi is up; accept one client at a time.
+  // Heartbeat + client management in one loop for tight coupling.
+  event_loop()->onRepeat(1000, []() {
+    // Start the server lazily once STA is connected
+    if (!log_server_started) {
+      if (WiFi.status() == WL_CONNECTED || WiFi.softAPgetStationNum() > 0) {
+        log_server.begin();
+        log_server_started = true;
+        ESP_LOGI("log_server", "TCP log server started, IP=%s",
+                 WiFi.localIP().toString().c_str());
+      }
+      return;
+    }
+
+    // Accept new connection (only one client at a time)
+    WiFiClient incoming = log_server.available();
+    if (incoming) {
+      if (log_client) log_client.stop();
+      log_client = incoming;
+      ESP_LOGI("log_server", "Log client connected");
+    }
+
+    // Drop stale client
+    if (log_client && !log_client.connected()) {
+      log_client.stop();
+    }
+
+    // Heartbeat line sent directly via TCP (bypasses vprintf)
+    if (log_client && log_client.connected()) {
+      char line[128];
+      snprintf(line, sizeof(line),
+               "heap=%u rpm=%.0f tank=%.2f coolant=%.1fC\r\n",
+               esp_get_free_heap_size(), disp_rpm, disp_tank, disp_coolant);
+      log_client.print(line);
+      log_client.flush();
+    }
+  });
+
   // initialize the I2C bus
   i2c = new TwoWire(0);
   i2c->begin(kSDAPin, kSCLPin);
+
+  // I2C scan — logs all responding addresses at boot
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    i2c->beginTransmission(addr);
+    if (i2c->endTransmission() == 0) {
+      ESP_LOGI("i2c_scan", "Device found at 0x%02X", addr);
+    }
+  }
 
   // Initialize ADS1115
   auto ads1115 = new Adafruit_ADS1115();
@@ -280,11 +355,11 @@ void setup() {
   // Set Product information
   // EDIT: Change the values below to match your device.
   nmea2000->SetProductInformation(
-      "20241128",  // Manufacturer's Model serial code (max 32 chars)
+      "20250614",  // Manufacturer's Model serial code (max 32 chars)
       104,         // Manufacturer's product code
       "PERKINS",   // Manufacturer's Model ID (max 33 chars)
-      "1.0.0",     // Manufacturer's Software version code (max 40 chars)
-      "1.0.0"      // Manufacturer's Model version (max 24 chars)
+      "1.0.2",     // Manufacturer's Software version code (max 40 chars)
+      "1.0.2"      // Manufacturer's Model version (max 24 chars)
   );
 
   // For device class/function information, see:

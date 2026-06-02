@@ -14,7 +14,11 @@ bool InitializeSSD1306(sensesp::SensESPBaseApp* sensesp_app,
   *display = new Adafruit_SSD1306(kScreenWidth, kScreenHeight, i2c, -1);
   bool init_successful = (*display)->begin(SSD1306_SWITCHCAPVCC, 0x3C);
   if (!init_successful) {
-    debugD("SSD1306 allocation failed");
+    // Retry with alternate I2C address (some displays use 0x3D)
+    init_successful = (*display)->begin(SSD1306_SWITCHCAPVCC, 0x3D);
+  }
+  if (!init_successful) {
+    ESP_LOGE("display", "SSD1306 not found on 0x3C or 0x3D");
     return false;
   }
   delay(100);
