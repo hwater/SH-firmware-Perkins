@@ -151,6 +151,12 @@ uint32_t g_can_rx_pkts = 0;
 // BUS_OFF auto-recovery bookkeeping at the SJA1000 register level (achtern02 style).
 uint32_t g_can_recoveries = 0;
 uint32_t g_can_last_recovery_ms = 0;
+// Cached CAN values for the /api/data handler. Updated only from the event-loop
+// task so the HTTP server task never touches the CAN peripheral directly
+// (concurrent register access caused intermittent empty responses).
+char g_can_state[12] = "init";
+uint8_t g_n2k_addr = 255;
+uint32_t g_can_tx = 0, g_can_txerr = 0, g_can_rxerr = 0;
 
 // CAN controller state read straight from the SJA1000 status register.
 // NMEA2000_esp32 bypasses the IDF TWAI driver, so there is no getStatus().
@@ -302,16 +308,16 @@ static String BuildDataJson() {
            alarm_states[2] ? "true" : "false");
   s += b;
 #ifdef ENABLE_NMEA2000_OUTPUT
-  snprintf(b, sizeof(b), "\"can_state\":\"%s\",\"n2k_addr\":%u,", CanStateStr(),
-           nmea2000->GetN2kSource());
+  // All cached values — no CAN peripheral access from the HTTP server task.
+  snprintf(b, sizeof(b), "\"can_state\":\"%s\",\"n2k_addr\":%u,", g_can_state,
+           g_n2k_addr);
   s += b;
   snprintf(b, sizeof(b), "\"can_tx\":%lu,\"can_rx\":%lu,",
-           (unsigned long)nmea2000->tx_frames, (unsigned long)g_can_rx_pkts);
+           (unsigned long)g_can_tx, (unsigned long)g_can_rx_pkts);
   s += b;
   snprintf(b, sizeof(b),
            "\"can_txerr\":%lu,\"can_rxerr\":%lu,\"can_recoveries\":%lu,",
-           (unsigned long)MODULE_CAN->TXERR.B.TXERR,
-           (unsigned long)MODULE_CAN->RXERR.B.RXERR,
+           (unsigned long)g_can_txerr, (unsigned long)g_can_rxerr,
            (unsigned long)g_can_recoveries);
   s += b;
 #endif
@@ -321,6 +327,75 @@ static String BuildDataJson() {
   s += b;
   return s;
 }
+
+// Self-contained live dashboard served at GET /dash. Polls /api/data.
+const char DASH_HTML[] PROGMEM = R"rawhtml(<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>perkins</title><style>
+:root{--bg:#0b1620;--card:#13202c;--fg:#e7eef5;--mut:#7f97a8;--ok:#2ecc71;--warn:#e74c3c}
+*{box-sizing:border-box}body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:var(--fg)}
+header{padding:14px 18px;background:#0e1c28;display:flex;justify-content:space-between;align-items:center}
+header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;color:var(--mut)}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));padding:14px}
+.card{background:var(--card);border-radius:10px;padding:14px 16px}
+.card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
+.row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0}
+.row .l{color:var(--mut);font-size:14px}.row .v{font-variant-numeric:tabular-nums;font-weight:600}
+.big{font-size:34px;font-weight:700}.unit{font-size:14px;color:var(--mut);font-weight:400;margin-left:4px}
+.pill{padding:2px 9px;border-radius:11px;font-size:12px;font-weight:600}
+.pill.ok{background:rgba(46,204,113,.15);color:var(--ok)}.pill.bad{background:rgba(231,76,60,.15);color:var(--warn)}
+</style></head><body>
+<header><h1>perkins</h1><span id="conn">verbinde…</span></header>
+<div class="grid">
+<div class="card"><h2>Motor</h2>
+<div class="big"><span id="rpm">--</span><span class="unit">U/min</span></div>
+<div class="row"><span class="l">Kraftstoff</span><span class="v"><span id="fuel">--</span> L/h</span></div></div>
+<div class="card"><h2>Temperaturen</h2>
+<div class="row"><span class="l">Kühlwasser</span><span class="v"><span id="coolant">--</span> °C</span></div>
+<div class="row"><span class="l">Auspuff</span><span class="v"><span id="exhaust">--</span> °C</span></div>
+<div class="row"><span class="l">Lichtmaschine</span><span class="v"><span id="alt">--</span> °C</span></div></div>
+<div class="card"><h2>Tank &amp; Alarme</h2>
+<div class="row"><span class="l">Tank</span><span class="v"><span id="tank">--</span> %</span></div>
+<div class="row"><span class="l">Alarm D2</span><span class="pill" id="d2">--</span></div>
+<div class="row"><span class="l">Alarm D3</span><span class="pill" id="d3">--</span></div></div>
+<div class="card"><h2>NMEA 2000</h2>
+<div class="row"><span class="l">Status</span><span class="v" id="can">--</span></div>
+<div class="row"><span class="l">N2K-Adresse</span><span class="v" id="addr">--</span></div>
+<div class="row"><span class="l">TX / RX Pakete</span><span class="v"><span id="tx">--</span> / <span id="rx">--</span></span></div>
+<div class="row"><span class="l">TX / RX Fehler</span><span class="v"><span id="txe">--</span> / <span id="rxe">--</span></span></div>
+<div class="row"><span class="l">Recoveries</span><span class="v" id="rec">--</span></div></div>
+<div class="card"><h2>System</h2>
+<div class="row"><span class="l">Hostname</span><span class="v" id="host">--</span></div>
+<div class="row"><span class="l">IP</span><span class="v" id="ip">--</span></div>
+<div class="row"><span class="l">WLAN</span><span class="v" id="wifi">--</span></div>
+<div class="row"><span class="l">Laufzeit</span><span class="v" id="up">--</span></div></div>
+</div>
+<script>
+var $=function(i){return document.getElementById(i)};
+function f(v,d){return (v==null)?'--':(typeof v==='number'?v.toFixed(d):v)}
+function upt(s){if(s==null)return'--';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+h+'h '+m+'m'}
+function pill(el,on){el.textContent=on?'AKTIV':'ok';el.className='pill '+(on?'bad':'ok')}
+function setConn(ok){$('conn').textContent=ok?'● live':'○ offline';$('conn').style.color=ok?'#2ecc71':'#e74c3c'}
+function render(d){
+$('rpm').textContent=f(d.rpm,0);$('fuel').textContent=f(d.fuel_lph,2);
+$('coolant').textContent=f(d.coolant_c,1);$('exhaust').textContent=f(d.exhaust_c,1);$('alt').textContent=f(d.alt_c,1);
+$('tank').textContent=f(d.tank_pct,0);pill($('d2'),d.alarm_d2);pill($('d3'),d.alarm_d3);
+$('can').textContent=f(d.can_state);$('addr').textContent=f(d.n2k_addr);
+$('tx').textContent=f(d.can_tx);$('rx').textContent=f(d.can_rx);
+$('txe').textContent=f(d.can_txerr);$('rxe').textContent=f(d.can_rxerr);$('rec').textContent=f(d.can_recoveries);
+$('host').textContent=f(d.hostname);$('ip').textContent=f(d.ip);
+$('wifi').textContent=d.wifi?'verbunden':'getrennt';$('up').textContent=upt(d.uptime_s)}
+var fails=0;
+function schedule(){setTimeout(tick,3000)}
+function tick(){
+var ac=new AbortController();var to=setTimeout(function(){ac.abort()},5000);
+fetch('/api/data',{cache:'no-store',signal:ac.signal})
+.then(function(r){if(!r.ok)throw 0;return r.json()})
+.then(function(d){clearTimeout(to);fails=0;setConn(true);render(d);schedule()})
+.catch(function(e){clearTimeout(to);if(++fails>=3)setConn(false);schedule()})}
+tick();
+</script></body></html>)rawhtml";
 
 void setup() {
   SetupLogging(ESP_LOG_DEBUG);
@@ -369,6 +444,13 @@ void setup() {
 
   strncpy(g_hostname, SensESPBaseApp::get_hostname().c_str(), sizeof(g_hostname) - 1);
   g_ap_boot_ms = millis();
+
+  // Disable WiFi modem sleep. Default modem-sleep causes erratic latency and
+  // dropped/timed-out HTTP requests on a marginal link; turning it off keeps
+  // the radio responsive (at a small extra current draw).
+  WiFi.setSleep(false);
+  // Re-assert periodically in case the WiFi stack is re-initialised on reconnect.
+  event_loop()->onRepeat(30000, []() { WiFi.setSleep(false); });
 
   // AP auto-shutdown
   auto ap_cfg = std::make_shared<APShutoffConfig>();
@@ -552,12 +634,21 @@ void setup() {
   event_loop()->onRepeat(1000, [st_can_state, st_n2k_addr, st_can_txpkt,
                                 st_can_rxpkt, st_can_txerr, st_can_rxerr,
                                 st_can_recov]() {
-    st_can_state->set(String(CanStateStr()));
-    st_n2k_addr->set(nmea2000->GetN2kSource());
-    st_can_txpkt->set(nmea2000->tx_frames);
+    // Read the CAN peripheral once here (event-loop task) and cache for both
+    // the status page items and the /api/data HTTP handler.
+    strncpy(g_can_state, CanStateStr(), sizeof(g_can_state) - 1);
+    g_can_state[sizeof(g_can_state) - 1] = '\0';
+    g_n2k_addr = nmea2000->GetN2kSource();
+    g_can_tx = nmea2000->tx_frames;
+    g_can_txerr = (uint32_t)MODULE_CAN->TXERR.B.TXERR;
+    g_can_rxerr = (uint32_t)MODULE_CAN->RXERR.B.RXERR;
+
+    st_can_state->set(String(g_can_state));
+    st_n2k_addr->set(g_n2k_addr);
+    st_can_txpkt->set(g_can_tx);
     st_can_rxpkt->set(g_can_rx_pkts);
-    st_can_txerr->set((uint32_t)MODULE_CAN->TXERR.B.TXERR);
-    st_can_rxerr->set((uint32_t)MODULE_CAN->RXERR.B.RXERR);
+    st_can_txerr->set(g_can_txerr);
+    st_can_rxerr->set(g_can_rxerr);
     st_can_recov->set(g_can_recoveries);
   });
 #endif  // ENABLE_NMEA2000_OUTPUT
@@ -931,6 +1022,15 @@ void setup() {
             return ESP_OK;
           });
       http_srv->add_handler(data_handler);
+
+      // Live dashboard: GET /dash
+      auto dash_handler = std::make_shared<HTTPRequestHandler>(
+          1 << HTTP_GET, "/dash", [](httpd_req_t* req) -> esp_err_t {
+            httpd_resp_set_type(req, "text/html");
+            httpd_resp_send(req, DASH_HTML, strlen(DASH_HTML));
+            return ESP_OK;
+          });
+      http_srv->add_handler(dash_handler);
     }
   }
 
