@@ -28,6 +28,8 @@
 #include "sensesp/signalk/signalk_output.h"
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp/system/system_status_led.h"
+#include "sensesp/transforms/curveinterpolator.h"
+#include "sensesp/transforms/frequency.h"
 #include "sensesp/transforms/lambda_transform.h"
 #include "sensesp/transforms/linear.h"
 #include "sensesp/ui/config_item.h"
@@ -54,6 +56,16 @@ using namespace sensesp;
 using namespace halmet;
 using namespace sensesp::onewire;
 
+// Helper to reach a registered ConfigItem's underlying object. SensESP 3.3's
+// ConfigItemT::get_config_object() does not compile, so this subclass exposes
+// the protected config_object_ pointer (used to grab the HTTPServer).
+template <typename T>
+struct ConfigItemPeek : public ConfigItemT<T> {
+  static std::shared_ptr<T> grab(ConfigItemT<T>& it) {
+    return static_cast<ConfigItemPeek<T>&>(it).config_object_;
+  }
+};
+
 // AP auto-shutdown — configurable, default 3 minutes (0 = never)
 class APShutoffConfig : public FileSystemSaveable {
  public:
@@ -71,6 +83,7 @@ class APShutoffConfig : public FileSystemSaveable {
 const String ConfigSchema(const APShutoffConfig&) {
   return R"###({"type":"object","properties":{"shutoff_min":{"title":"AP Abschaltung (Min)","type":"integer","description":"AP nach N Minuten abschalten. 0 = nie."}}})###";
 }
+
 
 #ifndef ENABLE_SIGNALK
 #define BUILDER_CLASS SensESPMinimalAppBuilder
@@ -162,6 +175,7 @@ static float   disp_tank    = -1;     // ratio 0-1, -1 = no data
 static float   disp_coolant = -300;   // °C, <-200 = no data
 static float   disp_exhaust = -300;
 static float   disp_alt     = -300;
+static float   g_fuel_lph   = 0;      // current fuel rate, L/h
 static char    g_hostname[32] = "PERKINS";
 
 // AP shutdown state
@@ -257,6 +271,57 @@ const int kTestOutputFrequency = 380;
 
 /////////////////////////////////////////////////////////////////////
 // The setup function performs one-time application initialization.
+// Build the live-data JSON served at GET /api/data.
+static String BuildDataJson() {
+  String s = "{";
+  char b[96];
+  snprintf(b, sizeof(b), "\"hostname\":\"%s\",\"uptime_s\":%lu,", g_hostname,
+           (unsigned long)(millis() / 1000));
+  s += b;
+  snprintf(b, sizeof(b), "\"rpm\":%.0f,\"fuel_lph\":%.2f,", disp_rpm,
+           g_fuel_lph);
+  s += b;
+  if (disp_coolant > -200) {
+    snprintf(b, sizeof(b), "\"coolant_c\":%.1f,", disp_coolant);
+    s += b;
+  }
+  if (disp_exhaust > -200) {
+    snprintf(b, sizeof(b), "\"exhaust_c\":%.1f,", disp_exhaust);
+    s += b;
+  }
+  if (disp_alt > -200) {
+    snprintf(b, sizeof(b), "\"alt_c\":%.1f,", disp_alt);
+    s += b;
+  }
+  if (disp_tank >= 0) {
+    snprintf(b, sizeof(b), "\"tank_pct\":%.0f,", disp_tank * 100.0f);
+    s += b;
+  }
+  snprintf(b, sizeof(b), "\"alarm_d2\":%s,\"alarm_d3\":%s,",
+           alarm_states[1] ? "true" : "false",
+           alarm_states[2] ? "true" : "false");
+  s += b;
+#ifdef ENABLE_NMEA2000_OUTPUT
+  snprintf(b, sizeof(b), "\"can_state\":\"%s\",\"n2k_addr\":%u,", CanStateStr(),
+           nmea2000->GetN2kSource());
+  s += b;
+  snprintf(b, sizeof(b), "\"can_tx\":%lu,\"can_rx\":%lu,",
+           (unsigned long)nmea2000->tx_frames, (unsigned long)g_can_rx_pkts);
+  s += b;
+  snprintf(b, sizeof(b),
+           "\"can_txerr\":%lu,\"can_rxerr\":%lu,\"can_recoveries\":%lu,",
+           (unsigned long)MODULE_CAN->TXERR.B.TXERR,
+           (unsigned long)MODULE_CAN->RXERR.B.RXERR,
+           (unsigned long)g_can_recoveries);
+  s += b;
+#endif
+  snprintf(b, sizeof(b), "\"wifi\":%s,\"ip\":\"%s\"}",
+           (WiFi.status() == WL_CONNECTED) ? "true" : "false",
+           WiFi.localIP().toString().c_str());
+  s += b;
+  return s;
+}
+
 void setup() {
   SetupLogging(ESP_LOG_DEBUG);
   orig_log_vprintf = esp_log_set_vprintf(log_vprintf);
@@ -657,6 +722,57 @@ void setup() {
   }
 
   ///////////////////////////////////////////////////////////////////
+  // Fuel flow sensor on D4 (GPIO 12) -> PGN 127489 (Engine Dynamic) fuel rate
+
+  // Count pulses on D4 and report the count every 500 ms, then convert to Hz.
+  auto* fuel_flow_counter = new DigitalInputCounter(
+      kDigitalInputPin4, INPUT, RISING, 500, "/Fuel Flow/Counter");
+  ConfigItem(fuel_flow_counter)
+      ->set_title("Kraftstoff-Durchfluss Eingang")
+      ->set_description("Digital-Eingang des Durchflusssensors (D4).");
+
+  auto* fuel_flow_hz = new Frequency(1.0);
+  fuel_flow_counter->connect_to(fuel_flow_hz);
+
+  // Non-linear turbine sensor: map frequency (Hz) -> fuel rate (L/h) with a
+  // configurable interpolation curve. Defaults from the measured points:
+  //   0 Hz=0, 21 Hz=4, 66 Hz=10, 200 Hz=20 L/h. Editable in the web UI.
+  auto* fuel_curve_defaults = new std::set<CurveInterpolator::Sample>({
+      CurveInterpolator::Sample(0.0f, 0.0f),
+      CurveInterpolator::Sample(21.0f, 4.0f),
+      CurveInterpolator::Sample(66.0f, 10.0f),
+      CurveInterpolator::Sample(200.0f, 20.0f),
+  });
+  auto* fuel_flow_lph =
+      new CurveInterpolator(fuel_curve_defaults, "/Fuel Flow/Curve");
+  fuel_flow_lph->set_input_title("Frequenz (Hz)")
+      ->set_output_title("Durchfluss (L/h)");
+  ConfigItem(fuel_flow_lph)
+      ->set_title("Kraftstoff-Durchfluss Kurve")
+      ->set_description(
+          "Stuetzstellen Frequenz (Hz) -> Durchfluss (L/h) des Sensors an D4, "
+          "linear interpoliert. Werksdaten: 21 Hz=4, 66 Hz=10, 200 Hz=20 L/h.")
+      ->set_sort_order(3020);
+  fuel_flow_hz->connect_to(fuel_flow_lph);
+
+#ifdef ENABLE_NMEA2000_OUTPUT
+  // PGN 127489 fuel rate is in L/h (float -> double for the sender).
+  auto* fuel_lph_to_double = new LambdaTransform<float, double>(
+      [](float lph) -> double { return (double)lph; });
+  fuel_flow_lph->connect_to(fuel_lph_to_double);
+  fuel_lph_to_double->connect_to(engine_dynamic_sender->fuel_rate_);
+#endif
+
+#ifdef ENABLE_SIGNALK
+  // Signal K fuel rate is in m^3/s: L/h / 3.6e6.
+  auto* fuel_flow_m3s = new LambdaTransform<float, float>(
+      [](float lph) -> float { return lph / 3.6e6f; });
+  fuel_flow_lph->connect_to(fuel_flow_m3s);
+  fuel_flow_m3s->connect_to(
+      new SKOutputFloat("propulsion.main.fuel.rate", "/Fuel Flow/SK Path"));
+#endif
+
+  ///////////////////////////////////////////////////////////////////
   // Display setup
 
   // 2-page OLED: page 0 = sensors, page 1 = CAN/SK/network. Switch every 7s.
@@ -793,6 +909,29 @@ void setup() {
     alt_12v_temp->connect_to(new LambdaConsumer<float>([](float value) {
       disp_alt = value - 273.15;
     }));
+  }
+
+  // Keep the latest fuel rate available for the /api/data endpoint.
+  fuel_flow_lph->connect_to(
+      new LambdaConsumer<float>([](float lph) { g_fuel_lph = lph; }));
+
+  // Custom live-data JSON endpoint on the SensESP web server: GET /api/data
+  auto httpserver_ci = ConfigItemBase::get_config_item("/system/httpserver");
+  if (httpserver_ci) {
+    auto cit = std::static_pointer_cast<ConfigItemT<HTTPServer>>(httpserver_ci);
+    std::shared_ptr<HTTPServer> http_srv =
+        ConfigItemPeek<HTTPServer>::grab(*cit);
+    if (http_srv) {
+      auto data_handler = std::make_shared<HTTPRequestHandler>(
+          1 << HTTP_GET, "/api/data", [](httpd_req_t* req) -> esp_err_t {
+            String json = BuildDataJson();
+            httpd_resp_set_type(req, "application/json");
+            httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+            httpd_resp_send(req, json.c_str(), json.length());
+            return ESP_OK;
+          });
+      http_srv->add_handler(data_handler);
+    }
   }
 
   // To avoid garbage collecting all shared pointers created in setup(),
