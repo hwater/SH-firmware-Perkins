@@ -279,8 +279,27 @@ void setup() {
                     ->enable_ota(OTA_PASSWORD)
                     ->get_app();
 
-  if (SensESPBaseApp::get_hostname() == "SensESP") {
-    SensESPBaseApp::get()->get_hostname_observable()->set("PERKINS");
+  // Set a lowercase hostname on first boot, and migrate the earlier uppercase
+  // "PERKINS" -> "perkins" so the mDNS name matches the case-sensitive Origin
+  // check in SensESP 3.3's restart/reset endpoints (accessed via perkins.local).
+  {
+    String hn = SensESPBaseApp::get_hostname();
+    if (hn == "SensESP" || hn == "PERKINS") {
+      SensESPBaseApp::get()->get_hostname_observable()->set("perkins");
+    }
+  }
+
+  // Customize the hostname configuration page.
+  auto hostname_ci = ConfigItemBase::get_config_item("/system/hostname");
+  if (hostname_ci) {
+    hostname_ci->set_title("Geraetename (Hostname)")
+        ->set_description(
+            "Netzwerkname des Geraets, zugleich mDNS-Name (&lt;name&gt;.local), "
+            "Anzeigename und Basis der SignalK-Quelle. Bitte KLEIN schreiben: "
+            "Restart/Reset in der Web-UI vergleichen den Hostnamen case-sensitiv "
+            "mit der aufgerufenen URL (z. B. perkins.local); bei Grossschreibung "
+            "schlaegt das mit \"403 Forbidden\" fehl. Aenderung wirkt nach "
+            "Neustart.");
   }
 
   strncpy(g_hostname, SensESPBaseApp::get_hostname().c_str(), sizeof(g_hostname) - 1);
