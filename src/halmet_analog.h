@@ -12,10 +12,13 @@ namespace halmet {
 // HALMET voltage divider scale factor
 const float kVoltageDividerScale = 33.3 / 3.3;
 
+// resistance_out (optional): if non-null, the live sender resistance (ohms) is
+// mirrored here on every read, for display/diagnostics (e.g. tank calibration).
 sensesp::FloatProducer* ConnectTankSender(Adafruit_ADS1115* ads1115,
                                           int channel, const String& name,
                                           const String& sk_id, int sort_order,
-                                          bool enable_signalk_output = true);
+                                          bool enable_signalk_output = true,
+                                          float* resistance_out = nullptr);
 
 class ADS1115VoltageInput : public sensesp::FloatSensor {
  public:

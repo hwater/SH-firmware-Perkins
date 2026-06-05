@@ -182,6 +182,8 @@ static float   disp_coolant = -300;   // °C, <-200 = no data
 static float   disp_exhaust = -300;
 static float   disp_alt     = -300;
 static float   g_fuel_lph   = 0;      // current fuel rate, L/h
+static float   g_tank_ohms  = -1;     // live fuel sender resistance (ohms), -1 = no data
+static float   g_tacho_hz   = 0;      // raw tacho input pulse frequency, Hz
 static char    g_hostname[32] = "PERKINS";
 
 // AP shutdown state
@@ -201,9 +203,9 @@ static void disp_draw(Adafruit_SSD1306* d) {
   d->setTextColor(SSD1306_WHITE);
   char hdr[22];
   snprintf(hdr, sizeof(hdr), "-- %s --", g_hostname);
-  // Row 0: hostname header, Row 1: blank
+  // Row 0: hostname header, Row 1: RPM + fuel rate (shown on both pages)
   disp_row(d, 0, "%s", hdr);
-  disp_row(d, 1, "");
+  disp_row(d, 1, "%4.0f U/min %3.1fL/h", disp_rpm, g_fuel_lph);
   if (disp_page == 0) {
     // Page 1: sensor data (rows 2-7)
     disp_row(d, 2, "RPM  %5.0f", disp_rpm);
@@ -288,6 +290,8 @@ static String BuildDataJson() {
   float fuel_v = (isnan(g_fuel_lph) || isinf(g_fuel_lph)) ? 0.0f : g_fuel_lph;
   snprintf(b, sizeof(b), "\"rpm\":%.0f,\"fuel_lph\":%.2f,", rpm_v, fuel_v);
   s += b;
+  snprintf(b, sizeof(b), "\"tacho_hz\":%.1f,", g_tacho_hz);
+  s += b;
   if (disp_coolant > -200) {
     snprintf(b, sizeof(b), "\"coolant_c\":%.1f,", disp_coolant);
     s += b;
@@ -302,6 +306,10 @@ static String BuildDataJson() {
   }
   if (disp_tank >= 0) {
     snprintf(b, sizeof(b), "\"tank_pct\":%.0f,", disp_tank * 100.0f);
+    s += b;
+  }
+  if (g_tank_ohms >= 0) {
+    snprintf(b, sizeof(b), "\"tank_ohm\":%.0f,", g_tank_ohms);
     s += b;
   }
   snprintf(b, sizeof(b), "\"alarm_d2\":%s,\"alarm_d3\":%s,",
@@ -338,6 +346,10 @@ const char DASH_HTML[] PROGMEM = R"rawhtml(<!DOCTYPE html>
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:var(--fg)}
 header{padding:14px 18px;background:#0e1c28;display:flex;justify-content:space-between;align-items:center}
 header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;color:var(--mut)}
+.brand{display:flex;align-items:center;gap:12px}
+.seslogo{display:inline-flex;align-items:center;transition:opacity .15s}
+.seslogo img{height:30px;width:auto;display:block}
+.seslogo:hover{opacity:.75}
 .grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));padding:14px}
 .card{background:var(--card);border-radius:10px;padding:14px 16px}
 .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
@@ -347,17 +359,19 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 .pill{padding:2px 9px;border-radius:11px;font-size:12px;font-weight:600}
 .pill.ok{background:rgba(46,204,113,.15);color:var(--ok)}.pill.bad{background:rgba(231,76,60,.15);color:var(--warn)}
 </style></head><body>
-<header><h1>perkins</h1><span id="conn">verbinde…</span></header>
+<header><div class="brand"><a class="seslogo" href="/" title="SensESP Konfiguration"><img src="/SensESP_logo_symbol.svg" alt="SensESP"></a><h1>perkins</h1></div><span id="conn">verbinde…</span></header>
 <div class="grid">
 <div class="card"><h2>Motor</h2>
 <div class="big"><span id="rpm">--</span><span class="unit">U/min</span></div>
-<div class="row"><span class="l">Kraftstoff</span><span class="v"><span id="fuel">--</span> L/h</span></div></div>
+<div class="row"><span class="l">Kraftstoff</span><span class="v"><span id="fuel">--</span> L/h</span></div>
+<div class="row"><span class="l">Puls</span><span class="v"><span id="thz">--</span> Hz</span></div></div>
 <div class="card"><h2>Temperaturen</h2>
 <div class="row"><span class="l">Kühlwasser</span><span class="v"><span id="coolant">--</span> °C</span></div>
 <div class="row"><span class="l">Auspuff</span><span class="v"><span id="exhaust">--</span> °C</span></div>
 <div class="row"><span class="l">Lichtmaschine</span><span class="v"><span id="alt">--</span> °C</span></div></div>
 <div class="card"><h2>Tank &amp; Alarme</h2>
 <div class="row"><span class="l">Tank</span><span class="v"><span id="tank">--</span> %</span></div>
+<div class="row"><span class="l">Sender</span><span class="v"><span id="tohm">--</span> Ω</span></div>
 <div class="row"><span class="l">Alarm D2</span><span class="pill" id="d2">--</span></div>
 <div class="row"><span class="l">Alarm D3</span><span class="pill" id="d3">--</span></div></div>
 <div class="card"><h2>NMEA 2000</h2>
@@ -379,9 +393,9 @@ function upt(s){if(s==null)return'--';var d=Math.floor(s/86400),h=Math.floor(s%8
 function pill(el,on){el.textContent=on?'AKTIV':'ok';el.className='pill '+(on?'bad':'ok')}
 function setConn(ok){$('conn').textContent=ok?'● live':'○ offline';$('conn').style.color=ok?'#2ecc71':'#e74c3c'}
 function render(d){
-$('rpm').textContent=f(d.rpm,0);$('fuel').textContent=f(d.fuel_lph,2);
+$('rpm').textContent=f(d.rpm,0);$('fuel').textContent=f(d.fuel_lph,2);$('thz').textContent=f(d.tacho_hz,1);
 $('coolant').textContent=f(d.coolant_c,1);$('exhaust').textContent=f(d.exhaust_c,1);$('alt').textContent=f(d.alt_c,1);
-$('tank').textContent=f(d.tank_pct,0);pill($('d2'),d.alarm_d2);pill($('d3'),d.alarm_d3);
+$('tank').textContent=f(d.tank_pct,0);$('tohm').textContent=f(d.tank_ohm,0);pill($('d2'),d.alarm_d2);pill($('d3'),d.alarm_d3);
 $('can').textContent=f(d.can_state);$('addr').textContent=f(d.n2k_addr);
 $('tx').textContent=f(d.can_tx);$('rx').textContent=f(d.can_rx);
 $('txe').textContent=f(d.can_txerr);$('rxe').textContent=f(d.can_rxerr);$('rec').textContent=f(d.can_recoveries);
@@ -654,6 +668,67 @@ void setup() {
   });
 #endif  // ENABLE_NMEA2000_OUTPUT
 
+  // Engine & sensor values on the web UI status page (group "Sensoren"),
+  // compact — mirrors the /dash readout. Not CAN-dependent, so it lives outside
+  // the ENABLE_NMEA2000_OUTPUT guard. Values are formatted strings with units
+  // and show "--" when the sensor has no data.
+  auto* st_rpm     = new StatusPageItem<String>("Drehzahl", "--", "Sensoren", 10);
+  auto* st_tacho_hz = new StatusPageItem<String>("Drehzahl Puls", "--", "Sensoren", 15);
+  auto* st_fuel    = new StatusPageItem<String>("Kraftstoff", "--", "Sensoren", 20);
+  auto* st_coolant = new StatusPageItem<String>("Kühlwasser", "--", "Sensoren", 30);
+  auto* st_exhaust = new StatusPageItem<String>("Auspuff", "--", "Sensoren", 40);
+  auto* st_alt     = new StatusPageItem<String>("Lichtmaschine", "--", "Sensoren", 50);
+  auto* st_tank    = new StatusPageItem<String>("Tank", "--", "Sensoren", 60);
+  auto* st_tank_ohm = new StatusPageItem<String>("Tank Sender", "--", "Sensoren", 65);
+  auto* st_al_d2   = new StatusPageItem<String>("Alarm D2", "--", "Sensoren", 70);
+  auto* st_al_d3   = new StatusPageItem<String>("Alarm D3", "--", "Sensoren", 80);
+
+  event_loop()->onRepeat(1000, [st_rpm, st_tacho_hz, st_fuel, st_coolant,
+                                st_exhaust, st_alt, st_tank, st_tank_ohm,
+                                st_al_d2, st_al_d3]() {
+    char v[24];
+    float rpm = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
+    snprintf(v, sizeof(v), "%.0f U/min", rpm);
+    st_rpm->set(v);
+    snprintf(v, sizeof(v), "%.1f Hz", g_tacho_hz);
+    st_tacho_hz->set(v);
+    float fuel = (isnan(g_fuel_lph) || isinf(g_fuel_lph)) ? 0.0f : g_fuel_lph;
+    snprintf(v, sizeof(v), "%.2f L/h", fuel);
+    st_fuel->set(v);
+    if (disp_coolant > -200) {
+      snprintf(v, sizeof(v), "%.1f °C", disp_coolant);
+      st_coolant->set(v);
+    } else {
+      st_coolant->set("--");
+    }
+    if (disp_exhaust > -200) {
+      snprintf(v, sizeof(v), "%.1f °C", disp_exhaust);
+      st_exhaust->set(v);
+    } else {
+      st_exhaust->set("--");
+    }
+    if (disp_alt > -200) {
+      snprintf(v, sizeof(v), "%.1f °C", disp_alt);
+      st_alt->set(v);
+    } else {
+      st_alt->set("--");
+    }
+    if (disp_tank >= 0) {
+      snprintf(v, sizeof(v), "%.0f %%", disp_tank * 100.0f);
+      st_tank->set(v);
+    } else {
+      st_tank->set("--");
+    }
+    if (g_tank_ohms >= 0) {
+      snprintf(v, sizeof(v), "%.0f Ω", g_tank_ohms);
+      st_tank_ohm->set(v);
+    } else {
+      st_tank_ohm->set("--");
+    }
+    st_al_d2->set(alarm_states[1] ? "ALARM" : "OK");
+    st_al_d3->set(alarm_states[2] ? "ALARM" : "OK");
+  });
+
 #ifndef ENABLE_SIGNALK
   // Initialize components that would normally be present in SensESPApp
   networking = new Networking("/System/WiFi Settings", "", "");
@@ -679,7 +754,7 @@ void setup() {
   // Without this guard, failed I2C reads lock up the bus and block the display.
   if (ads_initialized) {
   auto tank_a1_volume = ConnectTankSender(ads1115, 0, "Fuel", "fuel.main", 3000,
-                                          enable_signalk_output);
+                                          enable_signalk_output, &g_tank_ohms);
   // auto tank_a2_volume = ConnectTankSender(ads1115, 1, "A2");
   // auto tank_a3_volume = ConnectTankSender(ads1115, 2, "A3");
   auto a4_pressure = ConnectTankSender(ads1115, 3, "Pressure", "engine.main",
@@ -788,7 +863,7 @@ void setup() {
 
   // Connect the tacho senders. Engine name is "main".
   // EDIT: More tacho inputs can be defined by duplicating the line below.
-  auto tacho_d1_frequency = ConnectTachoSender(kDigitalInputPin1, "main");
+  auto tacho_d1_frequency = ConnectTachoSender(kDigitalInputPin1, "main", &g_tacho_hz);
 
 #ifdef ENABLE_NMEA2000_OUTPUT
   // Connect outputs to the N2k senders.
@@ -874,13 +949,13 @@ void setup() {
   ///////////////////////////////////////////////////////////////////
   // Display setup
 
-  // 2-page OLED: page 0 = sensors, page 1 = CAN/SK/network. Switch every 7s.
+  // 2-page OLED: page 0 = sensors (default), page 1 = CAN/SK/network.
+  // Show the sensor page most of the time; once per minute flip to the status
+  // page for 5 seconds. Redraw once a second so live values stay current.
   if (display_present) {
-    event_loop()->onRepeat(7000, []() {
-      disp_page = 1 - disp_page;
-      disp_draw(display);
-    });
     event_loop()->onRepeat(1000, []() {
+      uint32_t phase_s = (millis() / 1000) % 60;  // 0..59 within each minute
+      disp_page = (phase_s >= 55) ? 1 : 0;        // last 5s of the minute = page 1
       disp_draw(display);
     });
   }
@@ -1039,6 +1114,17 @@ void setup() {
             return ESP_OK;
           });
       http_srv->add_handler(dash_handler);
+
+      // Status shortcut: GET /status -> redirect to the SensESP web UI at /,
+      // which hosts the device status/config page (restart/reset, SK paths).
+      auto status_handler = std::make_shared<HTTPRequestHandler>(
+          1 << HTTP_GET, "/status", [](httpd_req_t* req) -> esp_err_t {
+            httpd_resp_set_status(req, "302 Found");
+            httpd_resp_set_hdr(req, "Location", "/");
+            httpd_resp_send(req, "", 0);
+            return ESP_OK;
+          });
+      http_srv->add_handler(status_handler);
     }
   }
 

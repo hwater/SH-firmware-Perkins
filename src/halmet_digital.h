@@ -5,7 +5,9 @@
 
 using namespace sensesp;
 
-FloatProducer* ConnectTachoSender(int pin, String name);
+// hz_out (optional): if non-null, the raw input pulse frequency (Hz) is
+// mirrored here on every read, for display/diagnostics (tacho calibration).
+FloatProducer* ConnectTachoSender(int pin, String name, float* hz_out = nullptr);
 BoolProducer* ConnectAlarmSender(int pin, String name);
 
 #endif

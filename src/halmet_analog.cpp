@@ -2,6 +2,7 @@
 
 #include "sensesp/sensors/sensor.h"
 #include "sensesp/signalk/signalk_output.h"
+#include "sensesp/system/lambda_consumer.h"
 #include "sensesp/system/valueproducer.h"
 #include "sensesp/transforms/curveinterpolator.h"
 #include "sensesp/transforms/linear.h"
@@ -18,7 +19,8 @@ const float kTankDefaultSize = 120. / 1000;
 sensesp::FloatProducer* ConnectTankSender(Adafruit_ADS1115* ads1115,
                                           int channel, const String& name,
                                           const String& sk_id, int sort_order,
-                                          bool enable_signalk_output) {
+                                          bool enable_signalk_output,
+                                          float* resistance_out) {
   const uint ads_read_delay = 500;  // ms
 
   // Configure the sender resistance sensor
@@ -29,6 +31,12 @@ sensesp::FloatProducer* ConnectTankSender(Adafruit_ADS1115* ads1115,
         float adc_output_volts = ads1115->computeVolts(adc_output);
         return kVoltageDividerScale * adc_output_volts / kMeasurementCurrent;
       });
+
+  // Mirror the live resistance to the caller's variable, if requested.
+  if (resistance_out != nullptr) {
+    sender_resistance->connect_to(new sensesp::LambdaConsumer<float>(
+        [resistance_out](float r) { *resistance_out = r; }));
+  }
 
   if (enable_signalk_output) {
     char resistance_sk_config_path[80];
