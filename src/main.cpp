@@ -347,7 +347,8 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
 .row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0}
 .row .l{color:var(--mut);font-size:14px}.row .v{font-variant-numeric:tabular-nums;font-weight:600;color:var(--acc)}
-.big{font-size:34px;font-weight:700}.unit{font-size:14px;color:var(--mut);font-weight:400;margin-left:4px}
+.big{font-size:34px;font-weight:700;color:var(--acc)}.unit{font-size:14px;color:var(--mut);font-weight:400;margin-left:4px}
+.stat .row .v{color:var(--fg)}
 .pill{padding:2px 9px;border-radius:11px;font-size:12px;font-weight:600}
 .pill.ok{background:rgba(46,204,113,.15);color:var(--ok)}.pill.bad{background:rgba(231,76,60,.15);color:var(--warn)}
 </style></head><body>
@@ -369,13 +370,13 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="row"><span class="l">Analog B</span><span class="v"><span id="vb">--</span> V</span></div>
 <div class="row"><span class="l">Öldruck D4</span><span class="pill" id="d2">--</span></div>
 <div class="row"><span class="l">Alarm D3</span><span class="pill" id="d3">--</span></div></div>
-<div class="card"><h2>NMEA 2000</h2>
+<div class="card stat"><h2>NMEA 2000</h2>
 <div class="row"><span class="l">Status</span><span class="v" id="can">--</span></div>
 <div class="row"><span class="l">N2K-Adresse</span><span class="v" id="addr">--</span></div>
 <div class="row"><span class="l">TX / RX Pakete</span><span class="v"><span id="tx">--</span> / <span id="rx">--</span></span></div>
 <div class="row"><span class="l">TX / RX Fehler</span><span class="v"><span id="txe">--</span> / <span id="rxe">--</span></span></div>
 <div class="row"><span class="l">Recoveries</span><span class="v" id="rec">--</span></div></div>
-<div class="card"><h2>System</h2>
+<div class="card stat"><h2>System</h2>
 <div class="row"><span class="l">Hostname</span><span class="v" id="host">--</span></div>
 <div class="row"><span class="l">IP</span><span class="v" id="ip">--</span></div>
 <div class="row"><span class="l">WLAN</span><span class="v" id="wifi">--</span></div>
