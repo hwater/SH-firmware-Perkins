@@ -97,33 +97,7 @@ SystemStatusLed* system_status_led;
 /////////////////////////////////////////////////////////////////////
 // Declare some global variables required for the firmware operation.
 
-// TCP log server — connect with: pio device monitor --port socket://10.0.1.89:23
-static WiFiServer      log_server(23);
-static WiFiClient      log_client;
-static bool            log_server_started = false;
-static vprintf_like_t  orig_log_vprintf   = nullptr;
-
-static int log_vprintf(const char* fmt, va_list args) {
-  // Copy args before the first consumer exhausts them
-  va_list args_tcp;
-  va_copy(args_tcp, args);
-
-  // UART output via the original handler
-  int len = orig_log_vprintf ? orig_log_vprintf(fmt, args) : vprintf(fmt, args);
-
-  // TCP output to connected client
-  if (log_client && log_client.connected()) {
-    char buf[512];
-    int n = vsnprintf(buf, sizeof(buf) - 1, fmt, args_tcp);
-    if (n > 0) {
-      log_client.write(reinterpret_cast<const uint8_t*>(buf), n);
-      log_client.flush();
-    }
-  }
-
-  va_end(args_tcp);
-  return len;
-}
+// (TCP log server on port 23 removed — logging is UART/serial only.)
 
 #ifdef ENABLE_NMEA2000_OUTPUT
 // SensESP's N2K senders transmit internally, so there is no SendMsg call site to
@@ -184,7 +158,8 @@ static float   disp_alt     = -300;
 static float   g_fuel_lph   = 0;      // current fuel rate, L/h
 static float   g_tank_ohms  = -1;     // live fuel sender resistance (ohms), -1 = no data
 static float   g_tacho_hz   = 0;      // raw tacho input pulse frequency, Hz
-static float   g_fuel_hz    = 0;      // raw fuel-flow input pulse frequency (D4), Hz
+static float   g_fuel_hz    = 0;      // raw fuel-flow input pulse frequency (D1), Hz
+static float   g_volt_b     = NAN;    // analog B (ADS1115 ch1) voltage, V
 static char    g_hostname[32] = "PERKINS";
 
 // AP shutdown state
@@ -209,7 +184,8 @@ static void disp_draw(Adafruit_SSD1306* d) {
   disp_row(d, 1, "%4.0f U/min %3.1fL/h", disp_rpm, g_fuel_lph);
   if (disp_page == 0) {
     // Page 1: sensor data (rows 2-7)
-    disp_row(d, 2, "RPM  %5.0f", disp_rpm);
+    if (isnan(g_volt_b)) disp_row(d, 2, "AnalogB    --");
+    else                 disp_row(d, 2, "AnalogB %5.2fV", g_volt_b);
     if (disp_tank >= 0) disp_row(d, 3, "Tank  %4.0f%%", disp_tank * 100);
     else                disp_row(d, 3, "Tank    --");
     if (disp_coolant > -200) disp_row(d, 4, "Kuehw %4.1fC", disp_coolant);
@@ -295,6 +271,10 @@ static String BuildDataJson() {
   s += b;
   snprintf(b, sizeof(b), "\"fuel_hz\":%.1f,", g_fuel_hz);
   s += b;
+  if (!isnan(g_volt_b)) {
+    snprintf(b, sizeof(b), "\"volt_b\":%.2f,", g_volt_b);
+    s += b;
+  }
   if (disp_coolant > -200) {
     snprintf(b, sizeof(b), "\"coolant_c\":%.1f,", disp_coolant);
     s += b;
@@ -377,7 +357,7 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="card"><h2>Tank &amp; Alarme</h2>
 <div class="row"><span class="l">Tank</span><span class="v"><span id="tank">--</span> %</span></div>
 <div class="row"><span class="l">Sender</span><span class="v"><span id="tohm">--</span> Ω</span></div>
-<div class="row"><span class="l">Öldruck</span><span class="pill" id="d2">--</span></div>
+<div class="row"><span class="l">Öldruck D4</span><span class="pill" id="d2">--</span></div>
 <div class="row"><span class="l">Alarm D3</span><span class="pill" id="d3">--</span></div></div>
 <div class="card"><h2>NMEA 2000</h2>
 <div class="row"><span class="l">Status</span><span class="v" id="can">--</span></div>
@@ -389,7 +369,8 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="row"><span class="l">Hostname</span><span class="v" id="host">--</span></div>
 <div class="row"><span class="l">IP</span><span class="v" id="ip">--</span></div>
 <div class="row"><span class="l">WLAN</span><span class="v" id="wifi">--</span></div>
-<div class="row"><span class="l">Laufzeit</span><span class="v" id="up">--</span></div></div>
+<div class="row"><span class="l">Laufzeit</span><span class="v" id="up">--</span></div>
+<div class="row"><span class="l">Analog B</span><span class="v"><span id="vb">--</span> V</span></div></div>
 </div>
 <script>
 var $=function(i){return document.getElementById(i)};
@@ -405,7 +386,7 @@ $('can').textContent=f(d.can_state);$('addr').textContent=f(d.n2k_addr);
 $('tx').textContent=f(d.can_tx);$('rx').textContent=f(d.can_rx);
 $('txe').textContent=f(d.can_txerr);$('rxe').textContent=f(d.can_rxerr);$('rec').textContent=f(d.can_recoveries);
 $('host').textContent=f(d.hostname);$('ip').textContent=f(d.ip);
-$('wifi').textContent=d.wifi?'verbunden':'getrennt';$('up').textContent=upt(d.uptime_s)}
+$('wifi').textContent=d.wifi?'verbunden':'getrennt';$('up').textContent=upt(d.uptime_s);$('vb').textContent=f(d.volt_b,2)}
 var fails=0;
 function schedule(){setTimeout(tick,3000)}
 function tick(){
@@ -419,7 +400,6 @@ tick();
 
 void setup() {
   SetupLogging(ESP_LOG_DEBUG);
-  orig_log_vprintf = esp_log_set_vprintf(log_vprintf);
 
   // These calls can be used for fine-grained control over the logging level.
   // esp_log_level_set("*", esp_log_level_t::ESP_LOG_DEBUG);
@@ -489,43 +469,6 @@ void setup() {
     }
   });
 
-  // Start TCP log server once WiFi is up; accept one client at a time.
-  // Heartbeat + client management in one loop for tight coupling.
-  event_loop()->onRepeat(1000, []() {
-    // Start the server lazily once STA is connected
-    if (!log_server_started) {
-      if (WiFi.status() == WL_CONNECTED || WiFi.softAPgetStationNum() > 0) {
-        log_server.begin();
-        log_server_started = true;
-        ESP_LOGI("log_server", "TCP log server started, IP=%s",
-                 WiFi.localIP().toString().c_str());
-      }
-      return;
-    }
-
-    // Accept new connection (only one client at a time)
-    WiFiClient incoming = log_server.available();
-    if (incoming) {
-      if (log_client) log_client.stop();
-      log_client = incoming;
-      ESP_LOGI("log_server", "Log client connected");
-    }
-
-    // Drop stale client
-    if (log_client && !log_client.connected()) {
-      log_client.stop();
-    }
-
-    // Heartbeat line sent directly via TCP (bypasses vprintf)
-    if (log_client && log_client.connected()) {
-      char line[128];
-      snprintf(line, sizeof(line),
-               "heap=%u rpm=%.0f tank=%.2f coolant=%.1fC\r\n",
-               esp_get_free_heap_size(), disp_rpm, disp_tank, disp_coolant);
-      log_client.print(line);
-      log_client.flush();
-    }
-  });
 
   // initialize the I2C bus
   i2c = new TwoWire(0);
@@ -685,12 +628,13 @@ void setup() {
   auto* st_alt     = new StatusPageItem<String>("Lichtmaschine", "--", "Sensoren", 50);
   auto* st_tank    = new StatusPageItem<String>("Tank", "--", "Sensoren", 60);
   auto* st_tank_ohm = new StatusPageItem<String>("Tank Sender", "--", "Sensoren", 65);
-  auto* st_al_d2   = new StatusPageItem<String>("Öldruck", "--", "Sensoren", 70);
+  auto* st_al_d2   = new StatusPageItem<String>("Öldruck D4", "--", "Sensoren", 70);
   auto* st_al_d3   = new StatusPageItem<String>("Alarm D3", "--", "Sensoren", 80);
+  auto* st_volt_b  = new StatusPageItem<String>("Analog B", "--", "Sensoren", 90);
 
   event_loop()->onRepeat(1000, [st_rpm, st_tacho_hz, st_fuel, st_coolant,
                                 st_exhaust, st_alt, st_tank, st_tank_ohm,
-                                st_al_d2, st_al_d3]() {
+                                st_al_d2, st_al_d3, st_volt_b]() {
     char v[24];
     float rpm = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
     snprintf(v, sizeof(v), "%.0f U/min", rpm);
@@ -732,6 +676,12 @@ void setup() {
     }
     st_al_d2->set(alarm_states[1] ? "ALARM" : "OK");
     st_al_d3->set(alarm_states[2] ? "ALARM" : "OK");
+    if (isnan(g_volt_b)) {
+      st_volt_b->set("--");
+    } else {
+      snprintf(v, sizeof(v), "%.2f V", g_volt_b);
+      st_volt_b->set(v);
+    }
   });
 
 #ifndef ENABLE_SIGNALK
@@ -773,8 +723,8 @@ void setup() {
       "/Tanks/Fuel/NMEA 2000", 0, N2kft_Fuel, 200, nmea2000);
 
   ConfigItem(tank_a1_sender)
-      ->set_title("Tank A1 NMEA 2000")
-      ->set_description("NMEA 2000 tank sender for tank A1")
+      ->set_title("Tank C NMEA 2000")
+      ->set_description("NMEA 2000 tank sender for the fuel tank (analog C)")
       ->set_sort_order(3005);
 
   tank_a1_volume->connect_to(&(tank_a1_sender->tank_level_));
@@ -789,12 +739,12 @@ void setup() {
   auto a2_voltage = new ADS1115VoltageInput(ads1115, 1, "/Voltage A2");
 
   ConfigItem(a2_voltage)
-      ->set_title("Analog Voltage A2")
-      ->set_description("Voltage level of analog input A2")
+      ->set_title("Analog Voltage B")
+      ->set_description("Voltage level of analog input B")
       ->set_sort_order(3000);
 
   a2_voltage->connect_to(new LambdaConsumer<float>(
-      [](float value) { debugD("Voltage A2: %f", value); }));
+      [](float value) { g_volt_b = value; }));
 
   a4_pressure->connect_to(new LambdaConsumer<float>(
       [](float value) { debugD("Pressure A3: %f", value); }));
@@ -808,8 +758,8 @@ void setup() {
 
 #ifdef ENABLE_SIGNALK
   a2_voltage->connect_to(
-      new SKOutputFloat("sensors.a2.voltage", "Analog Voltage A2",
-                        new SKMetadata("V", "Analog Voltage A2")));
+      new SKOutputFloat("sensors.a2.voltage", "Analog Voltage B",
+                        new SKMetadata("V", "Analog Voltage B")));
   a4_pressure->connect_to(
       new SKOutputFloat("sensors.a4.pressure", "Analog Pressure A3",
                         new SKMetadata("P", "Analog Pressure A3")));
@@ -898,7 +848,7 @@ void setup() {
       kDigitalInputPin1, INPUT, RISING, 500, "/Fuel Flow/Counter");
   ConfigItem(fuel_flow_counter)
       ->set_title("Kraftstoff-Durchfluss Eingang")
-      ->set_description("Digital-Eingang des Durchflusssensors (D4).");
+      ->set_description("Digital-Eingang des Durchflusssensors (D1).");
 
   auto* fuel_flow_hz = new Frequency(1.0);
   fuel_flow_counter->connect_to(fuel_flow_hz);
