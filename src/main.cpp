@@ -334,7 +334,7 @@ const char DASH_HTML[] PROGMEM = R"rawhtml(<!DOCTYPE html>
 <html lang="de"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>perkins</title><style>
-:root{--bg:#0b1620;--card:#13202c;--fg:#e7eef5;--mut:#7f97a8;--ok:#2ecc71;--warn:#e74c3c}
+:root{--bg:#0b1620;--card:#13202c;--fg:#e7eef5;--mut:#7f97a8;--ok:#2ecc71;--warn:#e74c3c;--acc:#00ff7f}
 *{box-sizing:border-box}body{margin:0;font-family:system-ui,Arial,sans-serif;background:var(--bg);color:var(--fg)}
 header{padding:14px 18px;background:#0e1c28;display:flex;justify-content:space-between;align-items:center}
 header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;color:var(--mut)}
@@ -346,7 +346,7 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 .card{background:var(--card);border-radius:10px;padding:14px 16px}
 .card h2{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:0 0 10px}
 .row{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0}
-.row .l{color:var(--mut);font-size:14px}.row .v{font-variant-numeric:tabular-nums;font-weight:600}
+.row .l{color:var(--mut);font-size:14px}.row .v{font-variant-numeric:tabular-nums;font-weight:600;color:var(--acc)}
 .big{font-size:34px;font-weight:700}.unit{font-size:14px;color:var(--mut);font-weight:400;margin-left:4px}
 .pill{padding:2px 9px;border-radius:11px;font-size:12px;font-weight:600}
 .pill.ok{background:rgba(46,204,113,.15);color:var(--ok)}.pill.bad{background:rgba(231,76,60,.15);color:var(--warn)}
