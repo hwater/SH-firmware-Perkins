@@ -184,6 +184,7 @@ static float   disp_alt     = -300;
 static float   g_fuel_lph   = 0;      // current fuel rate, L/h
 static float   g_tank_ohms  = -1;     // live fuel sender resistance (ohms), -1 = no data
 static float   g_tacho_hz   = 0;      // raw tacho input pulse frequency, Hz
+static float   g_fuel_hz    = 0;      // raw fuel-flow input pulse frequency (D4), Hz
 static char    g_hostname[32] = "PERKINS";
 
 // AP shutdown state
@@ -292,6 +293,8 @@ static String BuildDataJson() {
   s += b;
   snprintf(b, sizeof(b), "\"tacho_hz\":%.1f,", g_tacho_hz);
   s += b;
+  snprintf(b, sizeof(b), "\"fuel_hz\":%.1f,", g_fuel_hz);
+  s += b;
   if (disp_coolant > -200) {
     snprintf(b, sizeof(b), "\"coolant_c\":%.1f,", disp_coolant);
     s += b;
@@ -361,10 +364,12 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 </style></head><body>
 <header><div class="brand"><a class="seslogo" href="/" title="SensESP Konfiguration"><img src="/SensESP_logo_symbol.svg" alt="SensESP"></a><h1>perkins</h1></div><span id="conn">verbinde…</span></header>
 <div class="grid">
-<div class="card"><h2>Motor</h2>
+<div class="card"><h2>Drehzahl</h2>
 <div class="big"><span id="rpm">--</span><span class="unit">U/min</span></div>
-<div class="row"><span class="l">Kraftstoff</span><span class="v"><span id="fuel">--</span> L/h</span></div>
-<div class="row"><span class="l">Puls</span><span class="v"><span id="thz">--</span> Hz</span></div></div>
+<div class="row"><span class="l">W-Puls</span><span class="v"><span id="thz">--</span> Hz</span></div></div>
+<div class="card"><h2>Verbrauch</h2>
+<div class="big"><span id="fuel">--</span><span class="unit">L/h</span></div>
+<div class="row"><span class="l">Durchfluss</span><span class="v"><span id="fhz">--</span> Hz</span></div></div>
 <div class="card"><h2>Temperaturen</h2>
 <div class="row"><span class="l">Kühlwasser</span><span class="v"><span id="coolant">--</span> °C</span></div>
 <div class="row"><span class="l">Auspuff</span><span class="v"><span id="exhaust">--</span> °C</span></div>
@@ -372,7 +377,7 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="card"><h2>Tank &amp; Alarme</h2>
 <div class="row"><span class="l">Tank</span><span class="v"><span id="tank">--</span> %</span></div>
 <div class="row"><span class="l">Sender</span><span class="v"><span id="tohm">--</span> Ω</span></div>
-<div class="row"><span class="l">Alarm D2</span><span class="pill" id="d2">--</span></div>
+<div class="row"><span class="l">Öldruck</span><span class="pill" id="d2">--</span></div>
 <div class="row"><span class="l">Alarm D3</span><span class="pill" id="d3">--</span></div></div>
 <div class="card"><h2>NMEA 2000</h2>
 <div class="row"><span class="l">Status</span><span class="v" id="can">--</span></div>
@@ -393,7 +398,7 @@ function upt(s){if(s==null)return'--';var d=Math.floor(s/86400),h=Math.floor(s%8
 function pill(el,on){el.textContent=on?'AKTIV':'ok';el.className='pill '+(on?'bad':'ok')}
 function setConn(ok){$('conn').textContent=ok?'● live':'○ offline';$('conn').style.color=ok?'#2ecc71':'#e74c3c'}
 function render(d){
-$('rpm').textContent=f(d.rpm,0);$('fuel').textContent=f(d.fuel_lph,2);$('thz').textContent=f(d.tacho_hz,1);
+$('rpm').textContent=f(d.rpm,0);$('thz').textContent=f(d.tacho_hz,1);$('fuel').textContent=f(d.fuel_lph,1);$('fhz').textContent=f(d.fuel_hz,1);
 $('coolant').textContent=f(d.coolant_c,1);$('exhaust').textContent=f(d.exhaust_c,1);$('alt').textContent=f(d.alt_c,1);
 $('tank').textContent=f(d.tank_pct,0);$('tohm').textContent=f(d.tank_ohm,0);pill($('d2'),d.alarm_d2);pill($('d3'),d.alarm_d3);
 $('can').textContent=f(d.can_state);$('addr').textContent=f(d.n2k_addr);
@@ -680,7 +685,7 @@ void setup() {
   auto* st_alt     = new StatusPageItem<String>("Lichtmaschine", "--", "Sensoren", 50);
   auto* st_tank    = new StatusPageItem<String>("Tank", "--", "Sensoren", 60);
   auto* st_tank_ohm = new StatusPageItem<String>("Tank Sender", "--", "Sensoren", 65);
-  auto* st_al_d2   = new StatusPageItem<String>("Alarm D2", "--", "Sensoren", 70);
+  auto* st_al_d2   = new StatusPageItem<String>("Öldruck", "--", "Sensoren", 70);
   auto* st_al_d3   = new StatusPageItem<String>("Alarm D3", "--", "Sensoren", 80);
 
   event_loop()->onRepeat(1000, [st_rpm, st_tacho_hz, st_fuel, st_coolant,
@@ -753,10 +758,10 @@ void setup() {
   // Connect the tank senders — only when ADS1115 was found.
   // Without this guard, failed I2C reads lock up the bus and block the display.
   if (ads_initialized) {
-  auto tank_a1_volume = ConnectTankSender(ads1115, 0, "Fuel", "fuel.main", 3000,
+  // Fuel tank sender on analog C (ADS1115 channel 2).
+  auto tank_a1_volume = ConnectTankSender(ads1115, 2, "Fuel", "fuel.main", 3000,
                                           enable_signalk_output, &g_tank_ohms);
-  // auto tank_a2_volume = ConnectTankSender(ads1115, 1, "A2");
-  // auto tank_a3_volume = ConnectTankSender(ads1115, 2, "A3");
+  // analog A (ch0) now free; analog B (ch1) is read as a voltage below.
   auto a4_pressure = ConnectTankSender(ads1115, 3, "Pressure", "engine.main",
                                        3010, enable_signalk_output);
 
@@ -816,14 +821,16 @@ void setup() {
 
   // EDIT: More alarm inputs can be defined by duplicating the lines below.
   // Make sure to not define a pin for both a tacho and an alarm.
-  auto alarm_d2_input = ConnectAlarmSender(kDigitalInputPin2, "D2");
+  // D2 (GPIO 13) repurposed as the alternator-W RPM input (see Tacho section).
   auto alarm_d3_input = ConnectAlarmSender(kDigitalInputPin3, "D3");
-  // auto alarm_d4_input = ConnectAlarmSender(kDigitalInputPin4, "D4");
+  // Low-oil-pressure alarm moved from D2 to D4 (GPIO 12). NOTE: GPIO 12 is a
+  // strapping pin — if D4 is HIGH at boot the ESP32 may fail to start. A low-oil
+  // switch that closes (to GND) when pressure is low keeps D4 LOW at boot (engine
+  // off), which is safe.
+  auto alarm_d4_input = ConnectAlarmSender(kDigitalInputPin4, "D4");
 
   // Update the alarm states based on the input value changes.
   // EDIT: If you added more alarm inputs, uncomment the respective lines below.
-  alarm_d2_input->connect_to(
-      new LambdaConsumer<bool>([](bool value) { alarm_states[1] = value; }));
   // In this example, alarm_d3_input is active low, so invert the value.
   // auto alarm_d3_inverted = alarm_d3_input->connect_to(
   //    new LambdaTransform<bool, bool>([](bool value) { return !value; }));
@@ -832,8 +839,10 @@ void setup() {
 
   alarm_d3_input->connect_to(
       new LambdaConsumer<bool>([](bool value) { alarm_states[2] = value; }));
-  // alarm_d4_input->connect_to(
-  //     new LambdaConsumer<bool>([](bool value) { alarm_states[3] = value; }));
+  // D4 = low-oil-pressure alarm; reuses the alarm_states[1] slot (the former D2
+  // tile on /dash + /api/data, relabelled "Oeldruck").
+  alarm_d4_input->connect_to(
+      new LambdaConsumer<bool>([](bool value) { alarm_states[1] = value; }));
 
 #ifdef ENABLE_NMEA2000_OUTPUT
   // EDIT: This example connects the D2 alarm input to the low oil pressure
@@ -847,59 +856,55 @@ void setup() {
       ->set_description("NMEA 2000 dynamic engine parameters for engine 1")
       ->set_sort_order(3010);
 
-  alarm_d2_input->connect_to(engine_dynamic_sender->low_oil_pressure_);
-
   // This is just an example -- normally temperature alarms would not be
   // active-low (inverted).
   // alarm_d3_inverted->connect_to(engine_dynamic_sender->over_temperature_);
   alarm_d3_input->connect_to(engine_dynamic_sender->over_temperature_);
+  alarm_d4_input->connect_to(engine_dynamic_sender->low_oil_pressure_);
 
 #endif  // ENABLE_NMEA2000_OUTPUT
 
   // FIXME: Transmit the alarms over SK as well.
 
   ///////////////////////////////////////////////////////////////////
-  // Digital tacho inputs
-
-  // Connect the tacho senders. Engine name is "main".
-  // EDIT: More tacho inputs can be defined by duplicating the line below.
-  auto tacho_d1_frequency = ConnectTachoSender(kDigitalInputPin1, "main", &g_tacho_hz);
+  // Engine RPM from the alternator "W" terminal (AC frequency proportional to
+  // engine RPM), wired to D2 (GPIO 13). The web-configurable "Tacho main
+  // Multiplier" converts W pulses -> revolutions: set it to
+  // 1 / (W-pulses per engine revolution) = 1 / (alternator pole pairs x pulley
+  // ratio). RPM = 60 * W-Hz * multiplier.
+  auto tacho_w_frequency = ConnectTachoSender(kDigitalInputPin2, "main", &g_tacho_hz);
 
 #ifdef ENABLE_NMEA2000_OUTPUT
-  // Connect outputs to the N2k senders.
-  // EDIT: Make sure this matches your tacho configuration above.
-  //       Duplicate the lines below to connect more tachos, but be sure to
-  //       use different engine instances.
   N2kEngineParameterRapidSender* engine_rapid_sender =
       new N2kEngineParameterRapidSender("/NMEA 2000/Engine 1 Rapid Update", 0,
                                         nmea2000);  // Engine 1, instance 0
-
   ConfigItem(engine_rapid_sender)
       ->set_title("Engine 1 Rapid Update")
       ->set_description("NMEA 2000 rapid update engine parameters for engine 1")
       ->set_sort_order(3015);
-
-  tacho_d1_frequency->connect_to(&(engine_rapid_sender->engine_speed_));
-
+  tacho_w_frequency->connect_to(&(engine_rapid_sender->engine_speed_));
 #endif  // ENABLE_NMEA2000_OUTPUT
 
   if (display_present) {
-    tacho_d1_frequency->connect_to(new LambdaConsumer<float>(
+    tacho_w_frequency->connect_to(new LambdaConsumer<float>(
         [](float value) { disp_rpm = 60 * value; }));
   }
 
   ///////////////////////////////////////////////////////////////////
-  // Fuel flow sensor on D4 (GPIO 12) -> PGN 127489 (Engine Dynamic) fuel rate
+  // Fuel flow sensor on D1 (GPIO 15) -> PGN 127489 (Engine Dynamic) fuel rate.
 
-  // Count pulses on D4 and report the count every 500 ms, then convert to Hz.
+  // Count pulses on D1 and report the count every 500 ms, then convert to Hz.
   auto* fuel_flow_counter = new DigitalInputCounter(
-      kDigitalInputPin4, INPUT, RISING, 500, "/Fuel Flow/Counter");
+      kDigitalInputPin1, INPUT, RISING, 500, "/Fuel Flow/Counter");
   ConfigItem(fuel_flow_counter)
       ->set_title("Kraftstoff-Durchfluss Eingang")
       ->set_description("Digital-Eingang des Durchflusssensors (D4).");
 
   auto* fuel_flow_hz = new Frequency(1.0);
   fuel_flow_counter->connect_to(fuel_flow_hz);
+  // Expose the raw D4 pulse frequency for the dashboard / diagnostics.
+  fuel_flow_hz->connect_to(
+      new LambdaConsumer<float>([](float hz) { g_fuel_hz = hz; }));
 
   // Non-linear turbine sensor: map frequency (Hz) -> fuel rate (L/h) with a
   // configurable interpolation curve. Defaults from the measured points:

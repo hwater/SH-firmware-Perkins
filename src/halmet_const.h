@@ -44,7 +44,7 @@ const gpio_num_t kCANTxPin = GPIO_NUM_32;
 const int kDigitalInputPin1 = GPIO_NUM_15;
 const int kDigitalInputPin2 = GPIO_NUM_13;
 const int kDigitalInputPin3 = GPIO_NUM_14;
-const int kDigitalInputPin4 = GPIO_NUM_12;
+const int kDigitalInputPin4 = GPIO_NUM_12;  // unused: fuel-flow sensor is on D1 (GPIO 15)
 
 // HALMET digital input pins
 //const int kDigitalInputPin1 = GPIO_NUM_23;
