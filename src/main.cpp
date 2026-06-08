@@ -357,6 +357,7 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="card"><h2>Tank &amp; Alarme</h2>
 <div class="row"><span class="l">Tank</span><span class="v"><span id="tank">--</span> %</span></div>
 <div class="row"><span class="l">Sender</span><span class="v"><span id="tohm">--</span> Ω</span></div>
+<div class="row"><span class="l">Analog B</span><span class="v"><span id="vb">--</span> V</span></div>
 <div class="row"><span class="l">Öldruck D4</span><span class="pill" id="d2">--</span></div>
 <div class="row"><span class="l">Alarm D3</span><span class="pill" id="d3">--</span></div></div>
 <div class="card"><h2>NMEA 2000</h2>
@@ -369,8 +370,7 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="row"><span class="l">Hostname</span><span class="v" id="host">--</span></div>
 <div class="row"><span class="l">IP</span><span class="v" id="ip">--</span></div>
 <div class="row"><span class="l">WLAN</span><span class="v" id="wifi">--</span></div>
-<div class="row"><span class="l">Laufzeit</span><span class="v" id="up">--</span></div>
-<div class="row"><span class="l">Analog B</span><span class="v"><span id="vb">--</span> V</span></div></div>
+<div class="row"><span class="l">Laufzeit</span><span class="v" id="up">--</span></div></div>
 </div>
 <script>
 var $=function(i){return document.getElementById(i)};
