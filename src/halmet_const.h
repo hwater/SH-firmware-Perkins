@@ -5,6 +5,38 @@
 
 namespace sensesp {
 
+#ifdef BOARD_DEV32
+// =========================================================================
+// Pin profile: bare ESP32 Dev Board (dev-board32) on the test bench.
+// Build with `pio run -e dev_board32` (see platformio.ini).
+// =========================================================================
+
+// 1-Wire bus (fridge-board wiring on the dev board)
+#define ONEWIRE_PIN 13
+
+// I2C pins (HALMET-style breakout wiring)
+const int kSDAPin = 21;
+const int kSCLPin = 22;
+
+// ADS1115 I2C address
+const int kADS1115Address = 0x4b;
+
+// CAN bus (NMEA 2000) pins on ESP32 Dev Board (external transceiver)
+const gpio_num_t kCANRxPin = GPIO_NUM_4;
+const gpio_num_t kCANTxPin = GPIO_NUM_5;
+
+// HALMET-style digital input pins
+const int kDigitalInputPin1 = GPIO_NUM_23;
+const int kDigitalInputPin2 = GPIO_NUM_25;
+const int kDigitalInputPin3 = GPIO_NUM_27;
+const int kDigitalInputPin4 = GPIO_NUM_26;
+
+#else
+// =========================================================================
+// Pin profile: Perkins boat unit on the SH-ESP32 + Engine Hat (production).
+// Build with `pio run -e esp32dev` (default).
+// =========================================================================
+
 // on fridge board
 //#define ONEWIRE_PIN 13
 // on SH-ESP32
@@ -21,8 +53,8 @@ namespace sensesp {
     // const int kSCLPin = 22;
 
 // I2C pins on SH-ESP32 Engine Hat.
-    const int kSDAPin = 16;
-    const int kSCLPin = 17;
+const int kSDAPin = 16;
+const int kSCLPin = 17;
 
 // ADS1115 I2C address
 const int kADS1115Address = 0x4b;
@@ -52,6 +84,7 @@ const int kDigitalInputPin4 = GPIO_NUM_12;  // unused: fuel-flow sensor is on D1
 //const int kDigitalInputPin3 = GPIO_NUM_27;
 //const int kDigitalInputPin4 = GPIO_NUM_26;
 
+#endif  // BOARD_DEV32
 
 }  // namespace sensesp
 

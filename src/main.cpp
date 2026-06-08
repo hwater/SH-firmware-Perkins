@@ -12,8 +12,17 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-#define ESP32_CAN_TX_PIN GPIO_NUM_32
-#define ESP32_CAN_RX_PIN GPIO_NUM_34
+// #define ESP32_CAN_TX_PIN GPIO_NUM_32
+// #define ESP32_CAN_RX_PIN GPIO_NUM_34
+//  Pin definitions for normal test hardware
+// ── CAN-Pins VOR NMEA2000_CAN.h definieren ──────────────────────────────
+//#define ESP32_CAN_TX_PIN GPIO_NUM_5
+//#define ESP32_CAN_RX_PIN GPIO_NUM_4
+
+static const uint8_t A4_ADC_PIN = 34;
+static const uint8_t A5_ADC_PIN = 35;
+static const uint8_t Beeper_LED_PIN = 12;
+static const uint8_t Taster_PIN = 0;
 
 #ifdef ENABLE_NMEA2000_OUTPUT
 #include "NMEA2000_esp32.h"
