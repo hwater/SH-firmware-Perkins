@@ -322,9 +322,10 @@ static String BuildDataJson() {
            (unsigned long)g_can_recoveries);
   s += b;
 #endif
-  snprintf(b, sizeof(b), "\"wifi\":%s,\"ip\":\"%s\"}",
+  snprintf(b, sizeof(b), "\"wifi\":%s,\"ip\":\"%s\",\"free_heap\":%lu}",
            (WiFi.status() == WL_CONNECTED) ? "true" : "false",
-           WiFi.localIP().toString().c_str());
+           WiFi.localIP().toString().c_str(),
+           (unsigned long)ESP.getFreeHeap());
   s += b;
   return s;
 }
@@ -380,7 +381,8 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="row"><span class="l">Hostname</span><span class="v" id="host">--</span></div>
 <div class="row"><span class="l">IP</span><span class="v" id="ip">--</span></div>
 <div class="row"><span class="l">WLAN</span><span class="v" id="wifi">--</span></div>
-<div class="row"><span class="l">Laufzeit</span><span class="v" id="up">--</span></div></div>
+<div class="row"><span class="l">Laufzeit</span><span class="v" id="up">--</span></div>
+<div class="row"><span class="l">Freier Speicher</span><span class="v" id="heap">--</span></div></div>
 </div>
 <script>
 var $=function(i){return document.getElementById(i)};
@@ -396,7 +398,8 @@ $('can').textContent=f(d.can_state);$('addr').textContent=f(d.n2k_addr);
 $('tx').textContent=f(d.can_tx);$('rx').textContent=f(d.can_rx);
 $('txe').textContent=f(d.can_txerr);$('rxe').textContent=f(d.can_rxerr);$('rec').textContent=f(d.can_recoveries);
 $('host').textContent=f(d.hostname);$('ip').textContent=f(d.ip);
-$('wifi').textContent=d.wifi?'verbunden':'getrennt';$('up').textContent=upt(d.uptime_s);$('vb').textContent=f(d.volt_b,2)}
+$('wifi').textContent=d.wifi?'verbunden':'getrennt';$('up').textContent=upt(d.uptime_s);$('vb').textContent=f(d.volt_b,2);
+$('heap').textContent=d.free_heap!=null?Math.round(d.free_heap/1024)+' kB':'--'}
 var fails=0;
 function schedule(){setTimeout(tick,3000)}
 function tick(){
