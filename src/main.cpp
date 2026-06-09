@@ -109,13 +109,14 @@ SystemStatusLed* system_status_led;
 // (TCP log server on port 23 removed — logging is UART/serial only.)
 
 #ifdef ENABLE_NMEA2000_OUTPUT
-// SensESP's N2K senders transmit internally, so there is no SendMsg call site to
-// count TX packets at (as achtern02 does). This thin subclass tallies sent CAN
-// frames at the driver level so the status page can show a TX packet count.
+// Counts TX and RX CAN frames at driver level so all frames are tallied,
+// including NMEA2000 protocol frames (address claiming, ISO requests) that
+// the library intercepts before calling the user MsgHandler.
 class CountingN2k : public tNMEA2000_esp32 {
  public:
   using tNMEA2000_esp32::tNMEA2000_esp32;
   uint32_t tx_frames = 0;
+  uint32_t rx_frames = 0;
 
  protected:
   bool CANSendFrame(unsigned long id, unsigned char len,
@@ -124,13 +125,18 @@ class CountingN2k : public tNMEA2000_esp32 {
     if (ok) tx_frames++;
     return ok;
   }
+  bool CANGetFrame(unsigned long &id, unsigned char &len,
+                   unsigned char *buf) override {
+    bool got = tNMEA2000_esp32::CANGetFrame(id, len, buf);
+    if (got) rx_frames++;
+    return got;
+  }
 };
 
 CountingN2k* nmea2000;
 elapsedMillis n2k_time_since_rx = 0;
 elapsedMillis n2k_time_since_tx = 0;
-// Received-message counter, fed by a tNMEA2000 message handler (achtern02 style).
-uint32_t g_can_rx_pkts = 0;
+uint32_t g_can_rx_pkts = 0;  // cached from nmea2000->rx_frames in the event loop
 // BUS_OFF auto-recovery bookkeeping at the SJA1000 register level (achtern02 style).
 uint32_t g_can_recoveries = 0;
 uint32_t g_can_last_recovery_ms = 0;
@@ -556,9 +562,6 @@ void setup() {
   nmea2000->EnableForward(false);
   nmea2000->Open();
 
-  // Count received N2K messages (achtern02 style: tNMEA2000 message handler,
-  // not a driver-level hook). Captureless lambda -> function pointer.
-  nmea2000->SetMsgHandler([](const tN2kMsg&) { g_can_rx_pkts++; });
 
   // ParseMessages() drives address claiming and processes received N2K frames.
   event_loop()->onRepeat(10, []() { nmea2000->ParseMessages(); });
@@ -616,6 +619,7 @@ void setup() {
     g_can_state[sizeof(g_can_state) - 1] = '\0';
     g_n2k_addr = nmea2000->GetN2kSource();
     g_can_tx = nmea2000->tx_frames;
+    g_can_rx_pkts = nmea2000->rx_frames;
     g_can_txerr = (uint32_t)MODULE_CAN->TXERR.B.TXERR;
     g_can_rxerr = (uint32_t)MODULE_CAN->RXERR.B.RXERR;
 
