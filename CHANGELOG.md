@@ -15,6 +15,15 @@ Engine‑monitor firmware for a Perkins marine engine on an **SH‑ESP32 Engine 
   Status page, the OLED, and `/api/data`. (`fa06b6f`, `60bce53`)
 - DS18B20 temperatures (coolant, exhaust, alternator) via SensESP `OneWireTemperature`.
 
+## Stability
+- **HTTP server no longer hangs after a few days uptime**: SensESP starts the
+  ESP‑IDF `httpd` with `HTTPD_DEFAULT_CONFIG()` (`max_open_sockets = 7`,
+  `lru_purge_enable = false`). Stale keep‑alive sockets from sleeping/departed
+  browsers pile up until the listener can no longer accept connections and the
+  web UI/API appears frozen. A pre‑build patch sets `lru_purge_enable = true` so
+  the oldest session is purged to admit a new one — the server self‑heals.
+  (`scripts/patch_sensesp_navbar.py`, Patch 4)
+
 ## Web interface
 - **`/dash`** live dashboard (dark card grid): Drehzahl, Verbrauch/Durchfluss,
   Temperaturen, Tank & Alarme, NMEA 2000, System. (`3eae96b`, `1fb9854`)

@@ -142,7 +142,36 @@ _WIFI_PROV_PATCHES = [
 ]
 
 # ---------------------------------------------------------------------------
+# Patch 4 – Enable LRU purge on the ESP-IDF httpd  (http_server.h)
+# SensESP starts the http server with HTTPD_DEFAULT_CONFIG(): max_open_sockets=7
+# and lru_purge_enable=false.  Stale keep-alive sockets from sleeping/departed
+# browsers pile up until the listener can no longer accept connections and the
+# web UI/API freezes after a few days uptime.  Setting lru_purge_enable=true
+# makes the server drop the least-recently-used (oldest/stale) session to admit
+# a new connection, so it self-heals.  Injected right before httpd_start, after
+# the other config_ tweaks.  (This framework's esp_http_server.h predates the
+# keep_alive_* config fields, so TCP keep-alive probes are not available here.)
+# ---------------------------------------------------------------------------
+_LRU_ANCHOR = (
+    "    config_.uri_match_fn = httpd_uri_match_wildcard;\n"
+)
+_LRU_REPLACEMENT = _LRU_ANCHOR + (
+    "    // [perkins] Self-heal long-uptime socket exhaustion: when all\n"
+    "    // max_open_sockets session slots are taken by stale/half-open\n"
+    "    // keep-alive connections, purge the least-recently-used one to admit\n"
+    "    // the new connection instead of refusing it (web-UI/API would\n"
+    "    // otherwise appear to hang after a few days). See patch_sensesp_navbar.py.\n"
+    "    config_.lru_purge_enable = true;\n"
+)
+
+_HTTP_SERVER_FILE = "SensESP/src/sensesp/net/http_server.h"
+_HTTP_SERVER_PATCHES = [
+    ("[perkins] Self-heal long-uptime socket exhaustion", _LRU_ANCHOR, _LRU_REPLACEMENT),
+]
+
+# ---------------------------------------------------------------------------
 # Apply all patches
 # ---------------------------------------------------------------------------
 _patch_file(_BASE_CMD_FILE, _BASE_CMD_PATCHES)
 _patch_file(_WIFI_PROV_FILE, _WIFI_PROV_PATCHES)
+_patch_file(_HTTP_SERVER_FILE, _HTTP_SERVER_PATCHES)
