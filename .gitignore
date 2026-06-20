@@ -8,3 +8,7 @@
 src/secrets.h
 secrets.ini
 .DS_Store
+
+# Stray `curl -O` artifacts from probing /api/data and /dash
+/data
+/dash
