@@ -271,6 +271,28 @@ const int kTestOutputFrequency = 380;
 
 /////////////////////////////////////////////////////////////////////
 // The setup function performs one-time application initialization.
+// Signal-K WebSocket-Client Verbindungsstatus als kurzer Anzeige-String.
+// get_connection_state() ist protected, daher das public get_connection_status()
+// (liefert englische Strings) nutzen und ins Deutsche uebersetzen. Ohne SignalK
+// (Minimal-App, kein ws_client) faellt es auf den WLAN-Status zurueck.
+#ifdef ENABLE_SIGNALK
+static const char* skStatusStr() {
+  if (!sensesp_app) return "n/a";
+  auto ws = sensesp_app->get_ws_client();
+  if (!ws) return "n/a";
+  String s = ws->get_connection_status();
+  if (s == "Connected")   return "verbunden";
+  if (s == "Connecting")  return "verbindet…";
+  if (s.startsWith("Authorizing")) return "autorisiert…";
+  if (s == "Disconnected") return "getrennt";
+  return "unbekannt";
+}
+#else
+static const char* skStatusStr() {
+  return (WiFi.status() == WL_CONNECTED) ? "WLAN ok" : "getrennt";
+}
+#endif
+
 // Build the live-data JSON served at GET /api/data.
 static String BuildDataJson() {
   String s = "{";
@@ -328,6 +350,8 @@ static String BuildDataJson() {
            (unsigned long)g_can_recoveries);
   s += b;
 #endif
+  snprintf(b, sizeof(b), "\"sk\":\"%s\",", skStatusStr());
+  s += b;
   snprintf(b, sizeof(b), "\"wifi\":%s,\"ip\":\"%s\",\"free_heap\":%lu}",
            (WiFi.status() == WL_CONNECTED) ? "true" : "false",
            WiFi.localIP().toString().c_str(),
@@ -386,7 +410,7 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="card stat"><h2>System</h2>
 <div class="row"><span class="l">Hostname</span><span class="v" id="host">--</span></div>
 <div class="row"><span class="l">IP</span><span class="v" id="ip">--</span></div>
-<div class="row"><span class="l">WLAN</span><span class="v" id="wifi">--</span></div>
+<div class="row"><span class="l">Signal K</span><span class="v" id="sk">--</span></div>
 <div class="row"><span class="l">Laufzeit</span><span class="v" id="up">--</span></div>
 <div class="row"><span class="l">Freier Speicher</span><span class="v" id="heap">--</span></div></div>
 </div>
@@ -404,7 +428,7 @@ $('can').textContent=f(d.can_state);$('addr').textContent=f(d.n2k_addr);
 $('tx').textContent=f(d.can_tx);$('rx').textContent=f(d.can_rx);
 $('txe').textContent=f(d.can_txerr);$('rxe').textContent=f(d.can_rxerr);$('rec').textContent=f(d.can_recoveries);
 $('host').textContent=f(d.hostname);$('ip').textContent=f(d.ip);
-$('wifi').textContent=d.wifi?'verbunden':'getrennt';$('up').textContent=upt(d.uptime_s);$('vb').textContent=f(d.volt_b,2);
+$('sk').textContent=d.sk||'--';$('up').textContent=upt(d.uptime_s);$('vb').textContent=f(d.volt_b,2);
 $('heap').textContent=d.free_heap!=null?Math.round(d.free_heap/1024)+' kB':'--'}
 var fails=0;
 function schedule(){setTimeout(tick,3000)}

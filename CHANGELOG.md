@@ -37,6 +37,10 @@ Engine‑monitor firmware for a Perkins marine engine on an **SH‑ESP32 Engine 
 - Dashboard colours refined — green (`#00ff7f`) for sensor data, white for the
   NMEA 2000 / System cards. (`df78908`, `e449617`)
 - **Free heap** on the System card. (`bf247e3`)
+- **Signal K status** on the System card, replacing the old WLAN row: shows the
+  live SK WebSocket client state (verbunden / verbindet… / autorisiert… /
+  getrennt) via the new `sk` field in `/api/data`. Guarded by `ENABLE_SIGNALK`
+  (falls back to the WLAN state in non‑SignalK builds).
 - Restart **403 Forbidden fix** + AP SSID aligned with the hostname. (`1ea05d9`)
 
 ## Platform
