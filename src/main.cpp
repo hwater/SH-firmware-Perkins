@@ -442,7 +442,11 @@ tick();
 </script></body></html>)rawhtml";
 
 void setup() {
-  SetupLogging(ESP_LOG_DEBUG);
+  // Test build: API/sensor debug logs aus. INFO-Level lässt INFO/WARN/ERROR
+  // durch, unterdrückt aber alle debugD/debugV (z.B. das pro Messwert geloggte
+  // "Pressure A3" und das SensESP-Debug-Geschwätz). Für volles Debug wieder auf
+  // ESP_LOG_DEBUG setzen.
+  SetupLogging(ESP_LOG_INFO);
 
   // These calls can be used for fine-grained control over the logging level.
   // esp_log_level_set("*", esp_log_level_t::ESP_LOG_DEBUG);
