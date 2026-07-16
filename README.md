@@ -11,7 +11,7 @@ a live web dashboard. Derived from the
 ### Digital inputs (Engine Hat terminals D1–D4)
 | Terminal | GPIO | Function | NMEA 2000 |
 |----------|------|----------|-----------|
-| D1 | 15 | **Fuel-flow** sensor — pulses → L/h via a configurable curve | 127489 (fuel rate) |
+| D1 | 15 | **Fuel-flow** sensor — pulses → L/h via a configurable curve; also drives the engine hour meter | 127489 (fuel rate, engine hours) |
 | D2 | 13 | **Engine RPM** from the alternator **W** terminal — frequency → RPM | 127488 (engine rapid) |
 | D3 | 14 | **Over-temperature** alarm | 127489 |
 | D4 | 12 | **Low-oil-pressure** alarm | 127489 |
@@ -45,6 +45,25 @@ a live web dashboard. Derived from the
 - **Tank level** — "Fuel Tank Level Curve": sender resistance (Ω) → level (0–1).
 - **RPM** — "Tacho main Multiplier" = 1 / (W-pulses per engine revolution)
   = 1 / (alternator pole-pairs × pulley ratio).
+- **Motorstunden** — "Zaehlerstand (h)" sets the hour meter to exactly the value
+  entered, so read the analogue gauge and type it in; the runtime accumulated
+  since the last set is reset. "Laufschwelle (L/h)" is the fuel rate above which
+  the engine counts as running (default 0.1).
+
+## Engine hour meter
+The engine counts as running while the fuel rate exceeds the configured
+threshold. The reading is the configured base ("Zaehlerstand") plus the runtime
+accumulated since, published as **PGN 127489** *Engine Total Hours of Operation*
+(seconds) and Signal K `propulsion.main.runTime` (seconds), and exposed on
+`/dash`, the Status page and `/api/data` (`engine_h` in hours, `engine_run`).
+
+The accumulator is written to flash when the engine stops and every 5 minutes of
+runtime — frequent enough that a power cut while running loses at most 0.08 h
+(below the gauge's 0.1 h step), rare enough not to wear the flash out.
+
+> ⚠️ The **AchternSensorik** board shares engine instance 0 and also sends
+> PGN 127489. It must not populate the engine-hours field, or it will compete
+> with this board on the bus. See `SH-firmware-Achtern` commit `dd8a3d3`.
 
 ## Build & upload (PlatformIO, env `esp32dev`)
 ```

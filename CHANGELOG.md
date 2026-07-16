@@ -14,6 +14,14 @@ Engine‑monitor firmware for a Perkins marine engine on an **SH‑ESP32 Engine 
 - **Analog Voltage B** (ADS1115 ch 1) shown on `/dash` (Tank & Alarme card), the
   Status page, the OLED, and `/api/data`. (`fa06b6f`, `60bce53`)
 - DS18B20 temperatures (coolant, exhaust, alternator) via SensESP `OneWireTemperature`.
+- **Engine hour meter** — the engine counts as running while the fuel rate
+  exceeds a configurable threshold (default 0.1 L/h). The reading is a base
+  offset (the analogue gauge reading) plus the runtime accumulated since, and
+  goes out as **PGN 127489** *Engine Total Hours of Operation* and Signal K
+  `propulsion.main.runTime`. The sender already had a `total_engine_hours_`
+  input but nothing fed it, so the field used to go out as N/A. Shown on
+  `/dash` (Verbrauch card, with a läuft/aus pill), the Status page and
+  `/api/data` (`engine_h`, `engine_run`). (`b02b051`)
 
 ## Stability
 - **HTTP server no longer hangs after a few days uptime**: SensESP starts the
@@ -49,10 +57,27 @@ Engine‑monitor firmware for a Perkins marine engine on an **SH‑ESP32 Engine 
 - CAN **RX counted at the driver level** instead of via the message handler. (`20bc074`)
 - **`dev_board32`** build environment for separate bench/test hardware, with its
   own navbar‑patch step. (`d5fbd69`, `3d7f55e`)
-- Lowercase hostname `perkins`. (`5d93dc6`) · SensESP 3.3.0. (`8fddf58`)
+- Lowercase hostname `perkins`. (`5d93dc6`) · SensESP **3.4.0**. (`8fddf58`, `a359cde`)
+- Runtime log level **`ESP_LOG_INFO`** instead of `ESP_LOG_DEBUG`: suppresses the
+  per‑reading `debugD` output and the SensESP debug chatter, keeps INFO/WARN/
+  ERROR. Raise it back to `ESP_LOG_DEBUG` in `setup()` when debugging. Note the
+  port‑23 log server is gone, so the serial log is USB‑only. (`a359cde`)
+- **Engine instance 0 is shared with the AchternSensorik board**, which also
+  sends PGN 127489. It used to put its own uptime in the engine‑hours field and
+  won on the bus, so Signal K's `propulsion.port.runTime` showed that board's
+  uptime (96.2 h) rather than the engine's. Fixed on that board
+  (`SH-firmware-Achtern` `dd8a3d3`); this board is now the sole authority for
+  engine hours. Both boards still send PGN 127488 (RPM) on instance 0.
 
 ## Calibration (web UI → Configuration, persisted in flash)
 - Fuel‑flow curve (Hz → L/h) and fuel‑tank level curve (Ω → level) are tunable.
+- **Motorstunden** (`/engine/hours`) — "Zaehlerstand (h)" sets the meter to
+  exactly the value entered (read it off the analogue gauge; the runtime
+  accumulated since the last set is reset), "Laufschwelle (L/h)" is the fuel
+  rate above which the engine counts as running. Seeded to **1445.7 h**
+  (gauge reading on 2026‑07‑16). The accumulator is written to flash when the
+  engine stops and every 5 min of runtime, so a power cut while running loses
+  at most 0.08 h — below the gauge's own 0.1 h step. (`b02b051`)
 
 ## Operations
 - **OTA:** the PlatformIO espota wrapper can stall at 0 % (it binds the host to
