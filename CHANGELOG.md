@@ -62,12 +62,16 @@ Engine‑monitor firmware for a Perkins marine engine on an **SH‑ESP32 Engine 
   per‑reading `debugD` output and the SensESP debug chatter, keeps INFO/WARN/
   ERROR. Raise it back to `ESP_LOG_DEBUG` in `setup()` when debugging. Note the
   port‑23 log server is gone, so the serial log is USB‑only. (`a359cde`)
-- **Engine instance 0 is shared with the AchternSensorik board**, which also
-  sends PGN 127489. It used to put its own uptime in the engine‑hours field and
-  won on the bus, so Signal K's `propulsion.port.runTime` showed that board's
-  uptime (96.2 h) rather than the engine's. Fixed on that board
-  (`SH-firmware-Achtern` `dd8a3d3`); this board is now the sole authority for
-  engine hours. Both boards still send PGN 127488 (RPM) on instance 0.
+- **Engine instance 0 is now this board's alone** → Signal K `propulsion.port`.
+  The AchternSensorik board used to share it and sent the same engine PGNs, so
+  the two overwrote each other: its own uptime landed in the engine‑hours field
+  of PGN 127489 and won, making `propulsion.port.runTime` read 96.2 h (that
+  board's uptime) instead of the engine's 1445.7 h, and its **shaft** RPM
+  competed with this board's **engine** RPM on PGN 127488 — different numbers,
+  separated by the gearbox ratio. That board now reports NA for engine hours
+  (`SH-firmware-Achtern` `dd8a3d3`) and has moved to engine instance 1 /
+  `propulsion.starboard`, leaving the actual engine on `propulsion.port` where
+  displays expect it.
 
 ## Calibration (web UI → Configuration, persisted in flash)
 - Fuel‑flow curve (Hz → L/h) and fuel‑tank level curve (Ω → level) are tunable.

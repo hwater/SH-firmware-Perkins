@@ -61,9 +61,11 @@ The accumulator is written to flash when the engine stops and every 5 minutes of
 runtime — frequent enough that a power cut while running loses at most 0.08 h
 (below the gauge's 0.1 h step), rare enough not to wear the flash out.
 
-> ⚠️ The **AchternSensorik** board shares engine instance 0 and also sends
-> PGN 127489. It must not populate the engine-hours field, or it will compete
-> with this board on the bus. See `SH-firmware-Achtern` commit `dd8a3d3`.
+> ⚠️ This board owns **engine instance 0** (Signal K `propulsion.port`) and is
+> the sole authority for engine hours. The **AchternSensorik** board sends the
+> same engine PGNs and used to share instance 0, which made the two overwrite
+> each other; it now reports NA for engine hours and sits on engine instance 1
+> (`propulsion.starboard`). Keep it there — see `SH-firmware-Achtern`.
 
 ## Build & upload (PlatformIO, env `esp32dev`)
 ```
