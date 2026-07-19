@@ -127,6 +127,35 @@ class EngineHours : public FileSystemSaveable {
     return true;
   }
 };
+// Plausibility limit for the fuel-flow reading. The turbine sensor emits
+// isolated spikes of 68-90 L/h with the engine stopped (seen 2026-07-18,
+// three of them), which are physically impossible on this engine — it draws
+// 2-6 L/h under way. Anything above the limit is treated as interference:
+// dropped rather than published, so it reaches neither the hour meter nor
+// NMEA 2000 / Signal K.
+class FuelPlausibility : public FileSystemSaveable {
+ public:
+  // 35 L/h sits above the calibrated curve's own maximum (200 Hz -> 30 L/h),
+  // so no genuine full-load reading is ever rejected, while the interference
+  // spikes seen on 2026-07-18 (68-90 L/h) are well clear of it. Do not lower
+  // this below the curve's top output.
+  double max_lph = 35.0;
+
+  FuelPlausibility() : FileSystemSaveable("/Fuel Flow/Plausibility") { load(); }
+
+  bool from_json(const JsonObject& obj) override {
+    if (obj["max_lph"].is<double>()) max_lph = obj["max_lph"];
+    return true;
+  }
+  bool to_json(JsonObject& obj) override {
+    obj["max_lph"] = max_lph;
+    return true;
+  }
+};
+const String ConfigSchema(const FuelPlausibility&) {
+  return R"###({"type":"object","properties":{"max_lph":{"title":"Max. plausibler Verbrauch (L/h)","type":"number","description":"Messwerte darueber gelten als Stoerimpuls und werden verworfen (nicht gezaehlt, nicht gesendet). NICHT unter den Hoechstwert der Durchfluss-Kurve setzen (derzeit 30 L/h bei 200 Hz), sonst werden echte Volllastwerte verworfen. 0 schaltet die Pruefung ab."}}})###";
+}
+
 const String ConfigSchema(const EngineHours&) {
   return R"###({"type":"object","properties":{"base_hours":{"title":"Zaehlerstand (h)","type":"number","description":"Motorstunden-Zaehlerstand. Eingeben = Zaehler exakt auf diesen Wert setzen (z.B. vom analogen Messgeraet ablesen). Die seither gezaehlte Laufzeit wird dabei zurueckgesetzt."},"threshold_lph":{"title":"Laufschwelle (L/h)","type":"number","description":"Ueber diesem Kraftstoffverbrauch gilt der Motor als laufend."}}})###";
 }
@@ -215,6 +244,8 @@ static float   g_fuel_hz    = 0;      // raw fuel-flow input pulse frequency (D1
 static float   g_volt_b     = NAN;    // analog B (ADS1115 ch1) voltage, V
 static double  g_engine_h   = 0;      // engine hour meter total, h
 static bool    g_engine_run  = false; // engine currently burning fuel
+static float   g_fuel_last_ok = 0;    // last plausible fuel rate, L/h
+static uint32_t g_fuel_spikes = 0;    // implausible readings dropped since boot
 static char    g_hostname[32] = "PERKINS";
 
 // AP shutdown state
@@ -351,6 +382,8 @@ static String BuildDataJson() {
   snprintf(b, sizeof(b), "\"engine_h\":%.1f,\"engine_run\":%s,", g_engine_h,
            g_engine_run ? "true" : "false");
   s += b;
+  snprintf(b, sizeof(b), "\"fuel_spikes\":%lu,", (unsigned long)g_fuel_spikes);
+  s += b;
   if (!isnan(g_volt_b)) {
     snprintf(b, sizeof(b), "\"volt_b\":%.2f,", g_volt_b);
     s += b;
@@ -436,7 +469,8 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="big"><span id="fuel">--</span><span class="unit">L/h</span></div>
 <div class="row"><span class="l">Durchfluss</span><span class="v"><span id="fhz">--</span> Hz</span></div>
 <div class="row"><span class="l">Motorstunden</span><span class="v"><span id="eh">--</span> h</span></div>
-<div class="row"><span class="l">Motor</span><span class="pill" id="erun">--</span></div></div>
+<div class="row"><span class="l">Motor</span><span class="pill" id="erun">--</span></div>
+<div class="row"><span class="l">Stoerimpulse</span><span class="v" id="fsp">--</span></div></div>
 <div class="card"><h2>Temperaturen</h2>
 <div class="row"><span class="l">Kühlwasser</span><span class="v"><span id="coolant">--</span> °C</span></div>
 <div class="row"><span class="l">Auspuff</span><span class="v"><span id="exhaust">--</span> °C</span></div>
@@ -469,7 +503,7 @@ function rpill(el,on){el.textContent=on?'LÄUFT':'aus';el.className='pill '+(on?
 function setConn(ok){$('conn').textContent=ok?'● live':'○ offline';$('conn').style.color=ok?'#2ecc71':'#e74c3c'}
 function render(d){
 $('rpm').textContent=f(d.rpm,0);$('thz').textContent=f(d.tacho_hz,1);$('fuel').textContent=f(d.fuel_lph,1);$('fhz').textContent=f(d.fuel_hz,1);
-$('eh').textContent=f(d.engine_h,1);rpill($('erun'),d.engine_run);
+$('eh').textContent=f(d.engine_h,1);rpill($('erun'),d.engine_run);$('fsp').textContent=f(d.fuel_spikes);
 $('coolant').textContent=f(d.coolant_c,1);$('exhaust').textContent=f(d.exhaust_c,1);$('alt').textContent=f(d.alt_c,1);
 $('tank').textContent=f(d.tank_pct,0);$('tohm').textContent=f(d.tank_ohm,0);pill($('d2'),d.alarm_d2);pill($('d3'),d.alarm_d3);
 $('can').textContent=f(d.can_state);$('addr').textContent=f(d.n2k_addr);
@@ -717,6 +751,7 @@ void setup() {
   auto* st_tacho_hz = new StatusPageItem<String>("Drehzahl Puls", "--", "Sensoren", 15);
   auto* st_fuel    = new StatusPageItem<String>("Kraftstoff", "--", "Sensoren", 20);
   auto* st_engine_h = new StatusPageItem<String>("Motorstunden", "--", "Sensoren", 25);
+  auto* st_fuel_spikes = new StatusPageItem<String>("Stoerimpulse Verbrauch", "--", "Sensoren", 26);
   auto* st_coolant = new StatusPageItem<String>("Kühlwasser", "--", "Sensoren", 30);
   auto* st_exhaust = new StatusPageItem<String>("Auspuff", "--", "Sensoren", 40);
   auto* st_alt     = new StatusPageItem<String>("Lichtmaschine", "--", "Sensoren", 50);
@@ -727,8 +762,9 @@ void setup() {
   auto* st_volt_b  = new StatusPageItem<String>("Analog B", "--", "Sensoren", 90);
 
   event_loop()->onRepeat(1000, [st_rpm, st_tacho_hz, st_fuel, st_engine_h,
-                                st_coolant, st_exhaust, st_alt, st_tank,
-                                st_tank_ohm, st_al_d2, st_al_d3, st_volt_b]() {
+                                st_fuel_spikes, st_coolant, st_exhaust, st_alt,
+                                st_tank, st_tank_ohm, st_al_d2, st_al_d3,
+                                st_volt_b]() {
     char v[24];
     float rpm = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
     snprintf(v, sizeof(v), "%.0f U/min", rpm);
@@ -740,6 +776,8 @@ void setup() {
     st_fuel->set(v);
     snprintf(v, sizeof(v), "%.1f h%s", g_engine_h, g_engine_run ? " (läuft)" : "");
     st_engine_h->set(v);
+    snprintf(v, sizeof(v), "%lu verworfen", (unsigned long)g_fuel_spikes);
+    st_fuel_spikes->set(v);
     if (disp_coolant > -200) {
       snprintf(v, sizeof(v), "%.1f °C", disp_coolant);
       st_coolant->set(v);
@@ -973,11 +1011,28 @@ void setup() {
       ->set_sort_order(3020);
   fuel_flow_hz->connect_to(fuel_flow_lph);
 
+  auto* fuel_plausibility = new FuelPlausibility();
+  ConfigItem(fuel_plausibility)
+      ->set_title("Kraftstoff-Plausibilitaet")
+      ->set_description(
+          "Verwirft unmoegliche Verbrauchswerte (Stoerimpulse am Eingang D1).")
+      ->set_sort_order(3025);
+
   // Sanitize the curve output: it can be NaN before the first valid reading,
   // which would poison the N2K fuel rate and make /api/data invalid JSON.
-  auto* fuel_flow_clean = new LambdaTransform<float, float>([](float lph) -> float {
-    return (isnan(lph) || isinf(lph)) ? 0.0f : lph;
-  });
+  // An implausible spike is dropped by holding the last good value — zeroing
+  // instead would punch a hole into the reading mid-run, and the next regular
+  // sample (every 500 ms) recovers on its own either way.
+  auto* fuel_flow_clean =
+      new LambdaTransform<float, float>([fuel_plausibility](float lph) -> float {
+        if (isnan(lph) || isinf(lph)) return 0.0f;
+        if (fuel_plausibility->max_lph > 0 && lph > fuel_plausibility->max_lph) {
+          g_fuel_spikes++;
+          return g_fuel_last_ok;
+        }
+        g_fuel_last_ok = lph;
+        return lph;
+      });
   fuel_flow_lph->connect_to(fuel_flow_clean);
 
 #ifdef ENABLE_NMEA2000_OUTPUT

@@ -49,6 +49,13 @@ a live web dashboard. Derived from the
   entered, so read the analogue gauge and type it in; the runtime accumulated
   since the last set is reset. "Laufschwelle (L/h)" is the fuel rate above which
   the engine counts as running (default 0.1).
+- **Kraftstoff-Plausibilitaet** — "Max. plausibler Verbrauch (L/h)" (default 35):
+  readings above this are treated as interference on the D1 pulse input and
+  dropped, so they reach neither the hour meter nor NMEA 2000 / Signal K.
+  **Keep it above the flow curve's highest output** (currently 30 L/h at 200 Hz)
+  or genuine full-load readings get rejected. `0` disables the check. Dropped
+  spikes are counted as `fuel_spikes` on `/dash`, the Status page and
+  `/api/data` — a rising count means the D1 wiring needs attention.
 
 ## Engine hour meter
 The engine counts as running while the fuel rate exceeds the configured

@@ -14,6 +14,24 @@ Engine‑monitor firmware for a Perkins marine engine on an **SH‑ESP32 Engine 
 - **Analog Voltage B** (ADS1115 ch 1) shown on `/dash` (Tank & Alarme card), the
   Status page, the OLED, and `/api/data`. (`fa06b6f`, `60bce53`)
 - DS18B20 temperatures (coolant, exhaust, alternator) via SensESP `OneWireTemperature`.
+- **Fuel-flow plausibility filter** — the turbine sensor emits isolated spikes
+  of 68–90 L/h with the engine stopped (three of them on 2026‑07‑18), which is
+  impossible on this engine: it draws 2–6 L/h under way. Readings above a
+  configurable limit (default **35 L/h** — deliberately above the flow curve's
+  own maximum of 30 L/h at 200 Hz, so no genuine full‑load reading is ever
+  rejected) are dropped at `fuel_flow_clean`, the
+  point every consumer hangs off, so a spike reaches neither the hour meter nor
+  PGN 127489 / Signal K. A dropped sample holds the last good value rather than
+  zeroing — zeroing would punch a hole into the reading mid‑run, and the next
+  sample (every 500 ms) recovers either way. Dropped spikes are counted and
+  shown on `/dash`, the Status page and `/api/data` (`fuel_spikes`), so a
+  recurring fault stays visible. The filter treats the symptom; a rising count
+  points at interference on the D1 pulse wiring.
+
+  > The same day's 81‑minute block of 2–5 L/h was **not** interference but real
+  > running, 15 min of it at idle with the shaft stopped — which is why the hour
+  > meter is not gated on shaft or engine RPM. Verified against the analogue
+  > gauge: both read 1449.4 h.
 - **Engine hour meter** — the engine counts as running while the fuel rate
   exceeds a configurable threshold (default 0.1 L/h). The reading is a base
   offset (the analogue gauge reading) plus the runtime accumulated since, and
