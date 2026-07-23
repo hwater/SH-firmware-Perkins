@@ -11,7 +11,7 @@ a live web dashboard. Derived from the
 ### Digital inputs (Engine Hat terminals D1–D4)
 | Terminal | GPIO | Function | NMEA 2000 |
 |----------|------|----------|-----------|
-| D1 | 15 | **Fuel-flow** sensor — pulses → L/h via a configurable curve; also drives the engine hour meter | 127489 (fuel rate, engine hours) |
+| D1 | 15 | **Fuel-flow** sensor ([flowTrecs FS-40-10-AL, Version S](docs/fuel-sensor-fs-40-10-al.md)) — pulses → L/h via a configurable curve; also drives the engine hour meter | 127489 (fuel rate, engine hours) |
 | D2 | 13 | **Engine RPM** from the alternator **W** terminal — frequency → RPM | 127488 (engine rapid) |
 | D3 | 14 | **Over-temperature** alarm | 127489 |
 | D4 | 12 | **Low-oil-pressure** alarm | 127489 |

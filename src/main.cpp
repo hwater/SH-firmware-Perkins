@@ -153,7 +153,7 @@ class FuelPlausibility : public FileSystemSaveable {
   }
 };
 const String ConfigSchema(const FuelPlausibility&) {
-  return R"###({"type":"object","properties":{"max_lph":{"title":"Max. plausibler Verbrauch (L/h)","type":"number","description":"Messwerte darueber gelten als Stoerimpuls und werden verworfen (nicht gezaehlt, nicht gesendet). NICHT unter den Hoechstwert der Durchfluss-Kurve setzen (derzeit 30 L/h bei 200 Hz), sonst werden echte Volllastwerte verworfen. 0 schaltet die Pruefung ab."}}})###";
+  return R"###({"type":"object","properties":{"max_lph":{"title":"Max. plausibler Verbrauch (L/h)","type":"number","description":"Messwerte darueber gelten als Stoerimpuls und werden verworfen (nicht gezaehlt, nicht gesendet). NICHT unter den Hoechstwert der Durchfluss-Kurve setzen (derzeit 20 L/h bei 200 Hz, FS-40-10-AL Version S), sonst werden echte Volllastwerte verworfen. 0 schaltet die Pruefung ab."}}})###";
 }
 
 const String ConfigSchema(const EngineHours&) {
