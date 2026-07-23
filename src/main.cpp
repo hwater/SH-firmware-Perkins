@@ -581,6 +581,39 @@ void setup() {
   // Re-assert periodically in case the WiFi stack is re-initialised on reconnect.
   event_loop()->onRepeat(30000, []() { WiFi.setSleep(false); });
 
+  // WiFi watchdog: after a router outage the Arduino WiFi stack can hang
+  // (e.g. AP channel change after router reboot); SensESP's auto-reconnect
+  // does not recover from that (observed 2026-07-21, 21 h offline).
+  // Stage 1: after 2 min offline, force a hard reconnect (fresh scan).
+  // Stage 2: after 15 min offline, restart - only while the engine is
+  // stopped (no RPM gap under way) and WiFi has been connected at least
+  // once since boot (avoids a reboot loop while the router stays down).
+  event_loop()->onRepeat(30000, []() {
+    static uint32_t down_since_ms  = 0;
+    static bool     ever_connected = false;
+    if (WiFi.status() == WL_CONNECTED) {
+      if (!ever_connected) {
+        WiFi.setAutoReconnect(true);
+        WiFi.persistent(false);  // keep reconnects out of NVS
+      }
+      ever_connected = true;
+      down_since_ms  = 0;
+      return;
+    }
+    if (down_since_ms == 0) { down_since_ms = millis(); return; }
+    uint32_t down_min = (millis() - down_since_ms) / 60000UL;
+    float rpm = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
+    if (down_min >= 15 && ever_connected && rpm < 1.0f) {
+      ESP_LOGW("wifi_wd", ">=15 min offline - restarting");
+      ESP.restart();
+    } else if (down_min >= 2) {
+      ESP_LOGW("wifi_wd", "%lu min offline - forcing reconnect",
+               (unsigned long)down_min);
+      WiFi.disconnect();
+      WiFi.reconnect();
+    }
+  });
+
   // AP auto-shutdown
   auto ap_cfg = std::make_shared<APShutoffConfig>();
   ConfigItem(ap_cfg)
