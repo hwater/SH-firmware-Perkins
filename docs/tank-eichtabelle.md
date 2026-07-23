@@ -12,7 +12,7 @@ durch die Eichung zu bestätigen.
 
 | Datum | Peilung (cm) | Anzeige analog | Geber (Ω) | Sensor-Level | Sensor-Volumen | Betriebsstd. analog | Bemerkung |
 |---|---|---|---|---|---|---|---|
-| 23.07.2026 | 10,0 | ≈ 1/2 | 191,2 | 26,6 % | ≈ 48 L | 1451,0 h | Erster Datenpunkt; Anzeige (½) und Geber (27 %) widersprechen sich |
+| 23.07.2026 | 10,0 | ≈ 1/10 | 191,2 | 26,6 % | ≈ 48 L | 1451,0 h | Erster Datenpunkt; Anzeige (1/10) pessimistischer als Geber (27 %) |
 
 ## Nachfüllungen
 
