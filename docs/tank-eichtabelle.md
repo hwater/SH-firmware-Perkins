@@ -31,6 +31,27 @@ durch die Eichung zu bestätigen.
   Nadel von ≈ 1/10 auf ≈ 1/2 — der untere Skalenbereich ist extrem
   gestaucht. Die Anzeige taugt nur als Grobwarnung, nicht zur Mengenschätzung.
 
+## Rücklauf-Test (Motor Perkins 4.236)
+
+> Zusammengefasst und weitergeführt in der Motor-Referenz
+> [perkins-4236.md](perkins-4236.md).
+
+Der 4.236 hat systembedingt einen Kraftstoffrücklauf (Injektor-Lecköl +
+CAV/DPA-Pumpenrücklauf). Da es nur **eine** Tankleitung gibt, wird der Rücklauf
+lokal im Motorraum (vor dem Sensor) zurückgeführt → der Durchflusssensor sieht
+nur den Netto-Verbrauch. Aus Daten bestätigt:
+
+| Fahrt | Sensor (integriert) | Tank-Geber (Abnahme) |
+|---|---|---|
+| 18.07.2026, ~3 h | 5,5 L | 11,9 L |
+
+Sensor < Tankabnahme → **kein Rücklauf-Fehler** (ein rücklaufmessender Sensor
+zeigte das 2–4-fache). Offen bleibt: **Sensor und Geber klaffen ~2× auseinander**
+— beide unkalibriert. 5,5 L/3 h (≈1,8 L/h) wäre fast Leerlauf, 11,9 L/3 h
+(≈4 L/h) für Teillast realistischer → Verdacht: Durchflusssensor unterschätzt,
+Tank näher an der Wahrheit. Schiedsrichter = Nachtank-Bilanz (kumulierter
+Sensor-Verbrauch zwischen zwei Betankungen vs. echte Liter).
+
 ## Vorgehen
 
 1. Bei jeder Gelegenheit (v. a. vor/nach dem Tanken): Peilstab-cm, analoge

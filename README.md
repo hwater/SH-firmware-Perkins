@@ -1,6 +1,7 @@
 # Perkins Engine Monitor (SH-ESP32 / SensESP)
 
-SensESP firmware that monitors a Perkins marine engine on an **SH-ESP32 Engine
+SensESP firmware that monitors a **Perkins 4.236** marine engine
+([engine reference](docs/perkins-4236.md)) on an **SH-ESP32 Engine
 Hat** (ESP32 + ADS1115 analog frontend + NMEA 2000 transceiver + SSD1306 OLED +
 1-Wire). It publishes engine data over **NMEA 2000** and **Signal K** and serves
 a live web dashboard. Derived from the
