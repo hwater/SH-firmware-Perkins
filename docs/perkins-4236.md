@@ -13,7 +13,24 @@ in eigenen Dateien: [Kraftstoffsensor](fuel-sensor-fs-40-10-al.md),
 | Bauart | 4-Zylinder-Reihen-Diesel, **3,86 L** Hubraum, indirekte Einspritzung |
 | Einspritzpumpe | CAV/DPA-Verteiler-(Rotations-)Pumpe |
 | Kraftstoffrücklauf | **Ja** — Injektor-Lecköl + Pumpenrücklauf |
-| Betriebsstunden (analog VDO) | 1451,0 h (Foto 23.07.2026); Zähler-Basis in Firmware konfigurierbar |
+| Betriebsstunden (analog VDO) | 1452,3 h (23.07.2026); Zähler-Basis in Firmware konfigurierbar |
+
+## Betriebsstundenzählung — geprüft ✓
+
+Die Firmware zählt Motorstunden als `base_hours` + Laufzeit, solange
+`Kraftstoffverbrauch > Laufschwelle`. **Abgleich 23.07.2026 bestätigt die
+Zählung als exakt:**
+
+| Quelle | Motorstunden |
+|---|---|
+| Analog (VDO) | 1452,3 h |
+| Firmware / N2K (`propulsion.main.runTime`) | 1452,3 h |
+| Differenz | **0,0 h** |
+
+→ Die Stundenzählung ist verlässlich (im Gegensatz zum Verbrauchs-/Tankteil,
+der noch kalibriert werden muss). Basiswert `base_hours` = 1445,7 h (gesetzt
+16.07.2026), Config *„Zählerstand (h)"* setzt den Zähler jederzeit exakt auf
+den analogen Wert.
 
 ## Kraftstoffsystem & Rücklauf — wichtig
 
