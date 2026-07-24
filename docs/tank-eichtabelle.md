@@ -8,7 +8,20 @@ Signal-K-Füllstand zu kalibrieren.
 Konfigurierte Kapazität (Firmware): 200 L (`tanks.fuel.0.capacity` = 0,2 m³) —
 durch die Eichung zu bestätigen.
 
-## Messungen
+## Frühere Messreihe (Anfang Juli 2026, Motorstand 1445,7 h)
+
+Erste Eichserie (ursprünglich auf dem M3 erfasst), Peilung + Geber-% gegen
+kumulierte Nachfüllmenge. „Anzeige %" = elektrischer Geber (`currentLevel`).
+
+| Ereignis | Peilung (cm) | Geber (%) | eingefüllt kum. (L) | Betriebsstd. |
+|---|---|---|---|---|
+| Start | 14 | 36 | 0 | — |
+| +21 L | 18 | 44 | 21 | — |
+| +21 L | 23 | 58 | 42 | — |
+| nach Fahrt | 12 | — | 42 | 1445,7 h |
+| +20 L | 16 | 42 | 62 | 1445,7 h |
+
+## Messungen (aktuell)
 
 | Datum | Peilung (cm) | Anzeige analog | Geber (Ω) | Sensor-Level | Sensor-Volumen | Betriebsstd. analog | Bemerkung |
 |---|---|---|---|---|---|---|---|
@@ -21,15 +34,34 @@ durch die Eichung zu bestätigen.
 |---|---|---|---|---|---|
 | 23.07.2026 | 20,0 | 10,0 | — (nachtragen) | ≈ 1/2 | Geber: 191,2→257,1 Ω (+65,8 Ω), Level 26,6→36,4 % |
 
-## Erste Erkenntnisse (23.07.2026, nach 20-L-Anker)
+## Erkenntnisse
 
-- **Kapazität bestätigt:** 20,0 L echte Liter = +9,7 % Geber-Level → Tank
-  ≈ **205 L**; die konfigurierten 200 L passen.
-- **Ω→Liter-Kurve leicht zu flach:** Sensor sah nur +17,5 L statt +20 L
-  (−12 % in diesem Bereich). Auflösung ≈ **3,3 Ω/L** um 200–260 Ω.
-- **Analoge VDO-Anzeige stark nichtlinear:** +10 % Tankinhalt bewegten die
-  Nadel von ≈ 1/10 auf ≈ 1/2 — der untere Skalenbereich ist extrem
-  gestaucht. Die Anzeige taugt nur als Grobwarnung, nicht zur Mengenschätzung.
+**Peilung ist die verlässlichste Eichgröße** — aus drei Nachfüllungen:
+
+| Nachfüllung | Δ Liter | Δ cm | L/cm |
+|---|---|---|---|
+| 14→18 cm (Juli-Serie) | 21 | 4 | 5,25 |
+| 18→23 cm (Juli-Serie) | 21 | 5 | 4,20 |
+| 12→16 cm (Juli-Serie) | 20 | 4 | 5,00 |
+
+→ **≈ 4,8 L/cm** im mittleren Tankbereich, gut reproduzierbar. Der Peilstab
+schlägt sowohl die analoge Nadel als auch den elektrischen Geber.
+
+- **cm und Geber sind untereinander konsistent:** ≈ 2,3 %/cm
+  (10 cm→26,6 %, 14 cm→36 %). Beide messen also *dieselbe* Höhe plausibel.
+- **Aber: Geber-% eignet sich nicht zur Mengenbestimmung** — die drei
+  Nachfüllungen ergeben 1,5–2,6 L pro %-Punkt (stark streuend), der untere
+  Kurvenbereich ist nichtlinear und die Ω→Liter-Kurve ~12 % zu flach
+  (20 L real = +9,7 % ≈ 205 L Kapazität, aber die Juli-%-Werte widersprechen
+  sich). Konfigurierte 200 L sind plausibel, aber noch nicht scharf.
+- **Analoge VDO-Anzeige stark nichtlinear:** +10 % Inhalt bewegten die Nadel
+  von ≈ 1/10 auf ≈ 1/2 — unterer Skalenbereich extrem gestaucht, nur
+  Grobwarnung.
+- **Fehlt für die Absolut-Eichung:** ein **Volltank-Referenzpunkt** (Peilung
+  bei randvollem Tank) — dann liefert 4,8 L/cm direkt Liter aus cm.
+
+Pegel-Trend: 12 cm (nach Fahrt, 1445,7 h) → 10 cm (1451,0 h, vor Tanken) —
+zwischenzeitliche Fahrten haben ~2 cm ≈ 10 L gezehrt.
 
 ## Rücklauf-Test (Motor Perkins 4.236)
 
