@@ -584,33 +584,61 @@ void setup() {
   // WiFi watchdog: after a router outage the Arduino WiFi stack can hang
   // (e.g. AP channel change after router reboot); SensESP's auto-reconnect
   // does not recover from that (observed 2026-07-21, 21 h offline).
-  // Stage 1: after 2 min offline, force a hard reconnect (fresh scan).
-  // Stage 2: after 15 min offline, restart - only while the engine is
-  // stopped (no RPM gap under way) and WiFi has been connected at least
-  // once since boot (avoids a reboot loop while the router stays down).
+  // Soft before hard, three stages:
+  //  SK stage: WiFi up but SK WebSocket disconnected -> ws->restart()+connect().
+  //    Clears a client stuck in "Connecting" and bypasses SensESP's backoff
+  //    (2s->60s). No reboot - useless if the server itself is down, and
+  //    restart() clears an ESP-side hang anyway. (25.07.2026: on the way back
+  //    the WiFi delta path dropped while CAN kept running; this stage catches it.)
+  //  WiFi stage 1: after 2 min offline, force a hard reconnect (fresh scan).
+  //  WiFi stage 2: after 15 min offline, restart - only while the engine is
+  //    stopped (no RPM gap under way) and WiFi connected at least once since boot.
   event_loop()->onRepeat(30000, []() {
-    static uint32_t down_since_ms  = 0;
-    static bool     ever_connected = false;
-    if (WiFi.status() == WL_CONNECTED) {
+    static uint32_t down_since_ms    = 0;   // WiFi down since
+    static uint32_t sk_down_since_ms = 0;   // SK WS down (WiFi up) since
+    static bool     ever_connected   = false;
+
+    bool wifi_up = (WiFi.status() == WL_CONNECTED);
+    auto ws = sensesp_app ? sensesp_app->get_ws_client() : nullptr;
+    bool sk_up = ws && ws->is_connected();
+
+    if (wifi_up && sk_up) {                 // healthy
       if (!ever_connected) {
         WiFi.setAutoReconnect(true);
-        WiFi.persistent(false);  // keep reconnects out of NVS
+        WiFi.persistent(false);             // keep reconnects out of NVS
       }
       ever_connected = true;
-      down_since_ms  = 0;
+      down_since_ms = 0; sk_down_since_ms = 0;
       return;
     }
-    if (down_since_ms == 0) { down_since_ms = millis(); return; }
-    uint32_t down_min = (millis() - down_since_ms) / 60000UL;
+
     float rpm = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
-    if (down_min >= 15 && ever_connected && rpm < 1.0f) {
-      ESP_LOGW("wifi_wd", ">=15 min offline - restarting");
-      ESP.restart();
-    } else if (down_min >= 2) {
-      ESP_LOGW("wifi_wd", "%lu min offline - forcing reconnect",
-               (unsigned long)down_min);
-      WiFi.disconnect();
-      WiFi.reconnect();
+
+    if (!wifi_up) {                          // --- WiFi down ---
+      sk_down_since_ms = 0;
+      if (down_since_ms == 0) { down_since_ms = millis(); return; }
+      uint32_t down_min = (millis() - down_since_ms) / 60000UL;
+      if (down_min >= 15 && ever_connected && rpm < 1.0f) {
+        ESP_LOGW("wifi_wd", ">=15 min offline - restarting");
+        ESP.restart();
+      } else if (down_min >= 2) {
+        ESP_LOGW("wifi_wd", "%lu min offline - forcing reconnect",
+                 (unsigned long)down_min);
+        WiFi.disconnect();
+        WiFi.reconnect();
+      }
+      return;
+    }
+
+    // --- WiFi up but SK WebSocket down: soft rebuild (no reboot) ---
+    down_since_ms = 0;
+    if (!ever_connected) { sk_down_since_ms = 0; return; }  // don't disturb first connect
+    if (sk_down_since_ms == 0) { sk_down_since_ms = millis(); return; }  // one grace cycle
+    if (ws) {
+      ESP_LOGW("sk_wd", "SK WS down %lus (WiFi ok) - reconnecting",
+               (unsigned long)((millis() - sk_down_since_ms) / 1000UL));
+      ws->restart();     // tear down stuck client -> state Disconnected
+      ws->connect();     // immediate retry, bypasses backoff wait
     }
   });
 
