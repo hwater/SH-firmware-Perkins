@@ -52,21 +52,36 @@ messender Sensor zeigte das 2–4-fache). Merke für die Zukunft: **Beim 4.236
 keine Zwei-Sensor-Differenzmessung nötig, solange die Rückführung vor dem
 Sensor bleibt.**
 
-## Gemessener Verbrauch (Stand 07/2026, unkalibriert)
+## Fahrten & Verbrauch (Stand 07/2026, Sensor unkalibriert)
 
-Stundenmittel echter Fahrten (nur Punkte > 0,5 L/h):
+Aus `propulsion.main.fuel.rate` segmentiert (Fahrt = zusammenhängende Phase
+> 0,5 L/h, Lücke > 15 min trennt), Verbrauch integriert, Zeiten in CEST:
 
-| Datum | Ø L/h (Motorstunden) |
-|---|---|
-| 12.07. | 2,5 / 1,5 |
-| 18.07. | 3,2 / 3,6 / 1,3 (vorm.) · 1,9 / 2,6 (nachm.) |
-| 21.07. | 1,5 / 3,1 / 2,1 |
+| Datum | Start–Ende | Dauer | Verbrauch (L) | Ø L/h | Art |
+|---|---|---|---|---|---|
+| 12.07. | 18:13–19:34 | 1h20 | 12,5 | 9,3 | Marsch |
+| 18.07. | 11:53–14:20 | 2h26 | 9,4 | 3,8 | Teillast/Manöver |
+| 18.07. | 17:24–18:50 | 1h26 | 13,0 | 9,0 | Marsch |
+| 21.07. | 14:32–16:41 | 2h08 | 6,6 | 3,1 | Teillast |
+| 23.07. | 19:46–20:18 | 0h31 | 1,1 | 2,2 | Manöver |
+| 23.07. | 23:31–23:48 | 0h17 | 0,5 | 1,7 | Manöver |
+| kleine Manöver (13.07., 23.07. je <0,3 L) | | ~0h20 | 0,5 | — | Rangieren |
 
-**Vorbehalt:** Diese Werte wirken für einen 4.236 niedrig (Marsch typ.
-6–12 L/h). Der Durchflusssensor **unterschätzt vermutlich** — der Tank-Geber
-zeigt über dieselbe Fahrt ~2× mehr. Welcher stimmt, klärt erst die
-**Nachtank-Bilanz** (kumulierter Sensor-Verbrauch zwischen zwei Betankungen
-vs. echte getankte Liter). Bis dahin: Verbrauchszahlen als Untergrenze lesen.
+**Summe echte Fahrten: ~8,4 h, ~43,6 L (Sensor), Ø ~5 L/h** (inkl. Leerlauf).
+Reine **Marschfahrten ~9 L/h** — für einen 4.236 realistisch.
+
+> **Störausreißer ausgeschlossen:** 13.07. 19:41–19:57 loggte 59 L in 16 min
+> (220 L/h) — physikalisch unmöglich, Störimpulse am Durchfluss-Eingang D1
+> („falsche Peaks nach Motorabschaltung"). Der Plausibilitätsfilter (max. 35
+> L/h) fängt das am N2K-Output ab, im Roh-Influx-Log stehen sie noch. Aus
+> allen Summen entfernt.
+
+**Kalibrier-Stand:** Marschfahrten (~9 L/h) sind plausibel. Am
+18.07.-Vormittag (Teillast) zeigt der Sensor 9,4 L vs. Tank-Geber-Abnahme
+11,9 L — **nur ~20 % Abweichung**, nicht 2× wie zunächst gedacht (der frühere
+5,5-L-Wert hatte ein zu enges Zeitfenster). Der Sensor ist damit besser als
+vermutet; die **Nachtank-Bilanz** über eine volle Tankfüllung bleibt der
+finale Abgleich.
 
 ## Sensor-Dimensionierung
 

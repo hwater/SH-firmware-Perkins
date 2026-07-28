@@ -35,8 +35,9 @@ the sensor can saturate; treat readings near the top of the curve as a floor.
 > gives up = **net consumption**. Verified from data (2026-07-18 trip): the
 > flow sensor integrated to 5.5 L while the tank gauge dropped ~11.9 L — the
 > sensor reads *less* than the tank, not more, which rules out any return-flow
-> contamination (a return-measuring sensor would read 2–4× the tank drop). See
-> [tank-eichtabelle.md](tank-eichtabelle.md) for the ongoing calibration.
+> contamination (a return-measuring sensor would read 2–4× the tank drop; here
+> it reads ~20 % *less*). See [tank-eichtabelle.md](tank-eichtabelle.md) and
+> [perkins-4236.md](perkins-4236.md) for the ongoing calibration.
 
 ## Firmware integration
 

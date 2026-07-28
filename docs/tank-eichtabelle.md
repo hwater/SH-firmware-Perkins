@@ -75,14 +75,13 @@ nur den Netto-Verbrauch. Aus Daten bestätigt:
 
 | Fahrt | Sensor (integriert) | Tank-Geber (Abnahme) |
 |---|---|---|
-| 18.07.2026, ~3 h | 5,5 L | 11,9 L |
+| 18.07.2026, 11:53–14:20 (volle Fahrt) | 9,4 L | 11,9 L |
 
 Sensor < Tankabnahme → **kein Rücklauf-Fehler** (ein rücklaufmessender Sensor
-zeigte das 2–4-fache). Offen bleibt: **Sensor und Geber klaffen ~2× auseinander**
-— beide unkalibriert. 5,5 L/3 h (≈1,8 L/h) wäre fast Leerlauf, 11,9 L/3 h
-(≈4 L/h) für Teillast realistischer → Verdacht: Durchflusssensor unterschätzt,
-Tank näher an der Wahrheit. Schiedsrichter = Nachtank-Bilanz (kumulierter
-Sensor-Verbrauch zwischen zwei Betankungen vs. echte Liter).
+zeigte das 2–4-fache). Abweichung nur **~20 %** (nicht 2× — ein früherer
+5,5-L-Wert hatte ein zu enges Zeitfenster). Beide noch unkalibriert;
+Schiedsrichter = Nachtank-Bilanz (kumulierter Sensor-Verbrauch zwischen zwei
+Betankungen vs. echte Liter). Details der Fahrten: [perkins-4236.md](perkins-4236.md).
 
 ## Vorgehen
 
