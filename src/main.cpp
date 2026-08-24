@@ -46,6 +46,7 @@ static const uint8_t Taster_PIN = 0;
 #ifdef ENABLE_SIGNALK
 #include "sensesp_app_builder.h"
 #include "secrets.h"  // AP_SSID, AP_PASS, OTA_PASSWORD (gitignored)
+#include "ws_reboot_watchdog.h"
 #define BUILDER_CLASS SensESPAppBuilder
 #else
 #include "sensesp_minimal_app_builder.h"
@@ -465,6 +466,10 @@ void setup() {
                     ->set_wifi_access_point(AP_SSID, AP_PASS)
                     ->enable_ota(OTA_PASSWORD)
                     ->get_app();
+
+  // Neustart, wenn der Signal-K-WebSocket dauerhaft tot bleibt — auch dann,
+  // wenn der WLAN-Stack "verbunden" behauptet. Siehe ws_reboot_watchdog.h.
+  start_ws_reboot_watchdog();
 
   // Set a lowercase hostname on first boot, and migrate the earlier uppercase
   // "PERKINS" -> "perkins" so the mDNS name matches the case-sensitive Origin
