@@ -94,6 +94,73 @@ const String ConfigSchema(const APShutoffConfig&) {
   return R"###({"type":"object","properties":{"shutoff_min":{"title":"AP Abschaltung (Min)","type":"integer","description":"AP nach N Minuten abschalten. 0 = nie."}}})###";
 }
 
+// Engine hour meter, fed to PGN 127489 "Engine Total Hours of Operation".
+// The engine counts as running whenever the fuel rate exceeds threshold_lph.
+// The reading is base_hours (what the analogue gauge showed when the meter was
+// last set) plus run_seconds accumulated since.
+class EngineHours : public FileSystemSaveable {
+ public:
+  double base_hours = 1445.7;   // analogue gauge reading, 2026-07-16
+  double threshold_lph = 0.1;   // above this fuel rate the engine is running
+  uint32_t run_seconds = 0;     // accumulated since base_hours was set
+
+  EngineHours() : FileSystemSaveable("/engine/hours") { load(); }
+
+  double total_hours() const { return base_hours + run_seconds / 3600.0; }
+  uint32_t total_seconds() const {
+    return (uint32_t)(base_hours * 3600.0 + 0.5) + run_seconds;
+  }
+
+  bool from_json(const JsonObject& obj) override {
+    if (obj["base_hours"].is<double>()) base_hours = obj["base_hours"];
+    if (obj["threshold_lph"].is<double>()) threshold_lph = obj["threshold_lph"];
+    // run_seconds is deliberately absent from ConfigSchema, so a form submit
+    // from the web UI carries no value here and zeroes the accumulator: typing
+    // a gauge reading sets the meter to exactly that. Loading from flash does
+    // carry it, and restores the running total.
+    run_seconds = obj["run_seconds"].is<uint32_t>() ? obj["run_seconds"] : 0;
+    return true;
+  }
+  bool to_json(JsonObject& obj) override {
+    obj["base_hours"] = base_hours;
+    obj["threshold_lph"] = threshold_lph;
+    obj["run_seconds"] = run_seconds;
+    return true;
+  }
+};
+// Plausibility limit for the fuel-flow reading. The turbine sensor emits
+// isolated spikes of 68-90 L/h with the engine stopped (seen 2026-07-18,
+// three of them), which are physically impossible on this engine — it draws
+// 2-6 L/h under way. Anything above the limit is treated as interference:
+// dropped rather than published, so it reaches neither the hour meter nor
+// NMEA 2000 / Signal K.
+class FuelPlausibility : public FileSystemSaveable {
+ public:
+  // 35 L/h sits above the calibrated curve's own maximum (200 Hz -> 30 L/h),
+  // so no genuine full-load reading is ever rejected, while the interference
+  // spikes seen on 2026-07-18 (68-90 L/h) are well clear of it. Do not lower
+  // this below the curve's top output.
+  double max_lph = 35.0;
+
+  FuelPlausibility() : FileSystemSaveable("/Fuel Flow/Plausibility") { load(); }
+
+  bool from_json(const JsonObject& obj) override {
+    if (obj["max_lph"].is<double>()) max_lph = obj["max_lph"];
+    return true;
+  }
+  bool to_json(JsonObject& obj) override {
+    obj["max_lph"] = max_lph;
+    return true;
+  }
+};
+const String ConfigSchema(const FuelPlausibility&) {
+  return R"###({"type":"object","properties":{"max_lph":{"title":"Max. plausibler Verbrauch (L/h)","type":"number","description":"Messwerte darueber gelten als Stoerimpuls und werden verworfen (nicht gezaehlt, nicht gesendet). NICHT unter den Hoechstwert der Durchfluss-Kurve setzen (derzeit 20 L/h bei 200 Hz, FS-40-10-AL Version S), sonst werden echte Volllastwerte verworfen. 0 schaltet die Pruefung ab."}}})###";
+}
+
+const String ConfigSchema(const EngineHours&) {
+  return R"###({"type":"object","properties":{"base_hours":{"title":"Zaehlerstand (h)","type":"number","description":"Motorstunden-Zaehlerstand. Eingeben = Zaehler exakt auf diesen Wert setzen (z.B. vom analogen Messgeraet ablesen). Die seither gezaehlte Laufzeit wird dabei zurueckgesetzt."},"threshold_lph":{"title":"Laufschwelle (L/h)","type":"number","description":"Ueber diesem Kraftstoffverbrauch gilt der Motor als laufend."}}})###";
+}
+
 
 #ifndef ENABLE_SIGNALK
 #define BUILDER_CLASS SensESPMinimalAppBuilder
@@ -176,6 +243,10 @@ static float   g_tank_ohms  = -1;     // live fuel sender resistance (ohms), -1 
 static float   g_tacho_hz   = 0;      // raw tacho input pulse frequency, Hz
 static float   g_fuel_hz    = 0;      // raw fuel-flow input pulse frequency (D1), Hz
 static float   g_volt_b     = NAN;    // analog B (ADS1115 ch1) voltage, V
+static double  g_engine_h   = 0;      // engine hour meter total, h
+static bool    g_engine_run  = false; // engine currently burning fuel
+static float   g_fuel_last_ok = 0;    // last plausible fuel rate, L/h
+static uint32_t g_fuel_spikes = 0;    // implausible readings dropped since boot
 static char    g_hostname[32] = "PERKINS";
 
 // AP shutdown state
@@ -309,6 +380,11 @@ static String BuildDataJson() {
   s += b;
   snprintf(b, sizeof(b), "\"fuel_hz\":%.1f,", g_fuel_hz);
   s += b;
+  snprintf(b, sizeof(b), "\"engine_h\":%.1f,\"engine_run\":%s,", g_engine_h,
+           g_engine_run ? "true" : "false");
+  s += b;
+  snprintf(b, sizeof(b), "\"fuel_spikes\":%lu,", (unsigned long)g_fuel_spikes);
+  s += b;
   if (!isnan(g_volt_b)) {
     snprintf(b, sizeof(b), "\"volt_b\":%.2f,", g_volt_b);
     s += b;
@@ -383,6 +459,7 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 .stat .row .v{color:var(--fg)}
 .pill{padding:2px 9px;border-radius:11px;font-size:12px;font-weight:600}
 .pill.ok{background:rgba(46,204,113,.15);color:var(--ok)}.pill.bad{background:rgba(231,76,60,.15);color:var(--warn)}
+.pill.off{background:rgba(127,151,168,.15);color:var(--mut)}
 </style></head><body>
 <header><div class="brand"><a class="seslogo" href="/" title="SensESP Konfiguration"><img src="/SensESP_logo_symbol.svg" alt="SensESP"></a><h1>perkins</h1></div><span id="conn">verbinde…</span></header>
 <div class="grid">
@@ -391,7 +468,10 @@ header h1{font-size:18px;margin:0;letter-spacing:.04em}#conn{font-size:13px;colo
 <div class="row"><span class="l">W-Puls</span><span class="v"><span id="thz">--</span> Hz</span></div></div>
 <div class="card"><h2>Verbrauch</h2>
 <div class="big"><span id="fuel">--</span><span class="unit">L/h</span></div>
-<div class="row"><span class="l">Durchfluss</span><span class="v"><span id="fhz">--</span> Hz</span></div></div>
+<div class="row"><span class="l">Durchfluss</span><span class="v"><span id="fhz">--</span> Hz</span></div>
+<div class="row"><span class="l">Motorstunden</span><span class="v"><span id="eh">--</span> h</span></div>
+<div class="row"><span class="l">Motor</span><span class="pill" id="erun">--</span></div>
+<div class="row"><span class="l">Stoerimpulse</span><span class="v" id="fsp">--</span></div></div>
 <div class="card"><h2>Temperaturen</h2>
 <div class="row"><span class="l">Kühlwasser</span><span class="v"><span id="coolant">--</span> °C</span></div>
 <div class="row"><span class="l">Auspuff</span><span class="v"><span id="exhaust">--</span> °C</span></div>
@@ -420,9 +500,11 @@ var $=function(i){return document.getElementById(i)};
 function f(v,d){return (v==null)?'--':(typeof v==='number'?v.toFixed(d):v)}
 function upt(s){if(s==null)return'--';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return (d?d+'d ':'')+h+'h '+m+'m'}
 function pill(el,on){el.textContent=on?'AKTIV':'ok';el.className='pill '+(on?'bad':'ok')}
+function rpill(el,on){el.textContent=on?'LÄUFT':'aus';el.className='pill '+(on?'ok':'off')}
 function setConn(ok){$('conn').textContent=ok?'● live':'○ offline';$('conn').style.color=ok?'#2ecc71':'#e74c3c'}
 function render(d){
 $('rpm').textContent=f(d.rpm,0);$('thz').textContent=f(d.tacho_hz,1);$('fuel').textContent=f(d.fuel_lph,1);$('fhz').textContent=f(d.fuel_hz,1);
+$('eh').textContent=f(d.engine_h,1);rpill($('erun'),d.engine_run);$('fsp').textContent=f(d.fuel_spikes);
 $('coolant').textContent=f(d.coolant_c,1);$('exhaust').textContent=f(d.exhaust_c,1);$('alt').textContent=f(d.alt_c,1);
 $('tank').textContent=f(d.tank_pct,0);$('tohm').textContent=f(d.tank_ohm,0);pill($('d2'),d.alarm_d2);pill($('d3'),d.alarm_d3);
 $('can').textContent=f(d.can_state);$('addr').textContent=f(d.n2k_addr);
@@ -504,6 +586,67 @@ void setup() {
   // Re-assert periodically in case the WiFi stack is re-initialised on reconnect.
   event_loop()->onRepeat(30000, []() { WiFi.setSleep(false); });
 
+  // WiFi watchdog: after a router outage the Arduino WiFi stack can hang
+  // (e.g. AP channel change after router reboot); SensESP's auto-reconnect
+  // does not recover from that (observed 2026-07-21, 21 h offline).
+  // Soft before hard, three stages:
+  //  SK stage: WiFi up but SK WebSocket disconnected -> ws->restart()+connect().
+  //    Clears a client stuck in "Connecting" and bypasses SensESP's backoff
+  //    (2s->60s). No reboot - useless if the server itself is down, and
+  //    restart() clears an ESP-side hang anyway. (25.07.2026: on the way back
+  //    the WiFi delta path dropped while CAN kept running; this stage catches it.)
+  //  WiFi stage 1: after 2 min offline, force a hard reconnect (fresh scan).
+  //  WiFi stage 2: after 15 min offline, restart - only while the engine is
+  //    stopped (no RPM gap under way) and WiFi connected at least once since boot.
+  event_loop()->onRepeat(30000, []() {
+    static uint32_t down_since_ms    = 0;   // WiFi down since
+    static uint32_t sk_down_since_ms = 0;   // SK WS down (WiFi up) since
+    static bool     ever_connected   = false;
+
+    bool wifi_up = (WiFi.status() == WL_CONNECTED);
+    auto ws = sensesp_app ? sensesp_app->get_ws_client() : nullptr;
+    bool sk_up = ws && ws->is_connected();
+
+    if (wifi_up && sk_up) {                 // healthy
+      if (!ever_connected) {
+        WiFi.setAutoReconnect(true);
+        WiFi.persistent(false);             // keep reconnects out of NVS
+      }
+      ever_connected = true;
+      down_since_ms = 0; sk_down_since_ms = 0;
+      return;
+    }
+
+    float rpm = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
+
+    if (!wifi_up) {                          // --- WiFi down ---
+      sk_down_since_ms = 0;
+      if (down_since_ms == 0) { down_since_ms = millis(); return; }
+      uint32_t down_min = (millis() - down_since_ms) / 60000UL;
+      if (down_min >= 15 && ever_connected && rpm < 1.0f) {
+        ESP_LOGW("wifi_wd", ">=15 min offline - restarting");
+        ESP.restart();
+      } else if (down_min >= 2) {
+        ESP_LOGW("wifi_wd", "%lu min offline - forcing reconnect",
+                 (unsigned long)down_min);
+        WiFi.disconnect();
+        WiFi.reconnect();
+      }
+      return;
+    }
+
+    // --- WiFi up but SK WebSocket down: soft rebuild (no reboot) ---
+    down_since_ms = 0;
+    if (!ever_connected) { sk_down_since_ms = 0; return; }  // don't disturb first connect
+    if (sk_down_since_ms == 0) { sk_down_since_ms = millis(); return; }  // one grace cycle
+    if (ws) {
+      ESP_LOGW("sk_wd", "SK WS down %lus (WiFi ok) - reconnecting",
+               (unsigned long)((millis() - sk_down_since_ms) / 1000UL));
+      ws->restart();     // tear down stuck client -> state Disconnected
+      ws->connect();     // immediate retry, bypasses backoff wait
+    }
+  });
+
   // AP auto-shutdown
   auto ap_cfg = std::make_shared<APShutoffConfig>();
   ConfigItem(ap_cfg)
@@ -569,8 +712,8 @@ void setup() {
       "20250614",  // Manufacturer's Model serial code (max 32 chars)
       104,         // Manufacturer's product code
       "PERKINS",   // Manufacturer's Model ID (max 33 chars)
-      "1.0.2",     // Manufacturer's Software version code (max 40 chars)
-      "1.0.2"      // Manufacturer's Model version (max 24 chars)
+      "1.1.0",     // Manufacturer's Software version code (max 40 chars)
+      "1.1.0"      // Manufacturer's Model version (max 24 chars)
   );
 
   // For device class/function information, see:
@@ -673,6 +816,8 @@ void setup() {
   auto* st_rpm     = new StatusPageItem<String>("Drehzahl", "--", "Sensoren", 10);
   auto* st_tacho_hz = new StatusPageItem<String>("Drehzahl Puls", "--", "Sensoren", 15);
   auto* st_fuel    = new StatusPageItem<String>("Kraftstoff", "--", "Sensoren", 20);
+  auto* st_engine_h = new StatusPageItem<String>("Motorstunden", "--", "Sensoren", 25);
+  auto* st_fuel_spikes = new StatusPageItem<String>("Stoerimpulse Verbrauch", "--", "Sensoren", 26);
   auto* st_coolant = new StatusPageItem<String>("Kühlwasser", "--", "Sensoren", 30);
   auto* st_exhaust = new StatusPageItem<String>("Auspuff", "--", "Sensoren", 40);
   auto* st_alt     = new StatusPageItem<String>("Lichtmaschine", "--", "Sensoren", 50);
@@ -682,9 +827,10 @@ void setup() {
   auto* st_al_d3   = new StatusPageItem<String>("Alarm D3", "--", "Sensoren", 80);
   auto* st_volt_b  = new StatusPageItem<String>("Analog B", "--", "Sensoren", 90);
 
-  event_loop()->onRepeat(1000, [st_rpm, st_tacho_hz, st_fuel, st_coolant,
-                                st_exhaust, st_alt, st_tank, st_tank_ohm,
-                                st_al_d2, st_al_d3, st_volt_b]() {
+  event_loop()->onRepeat(1000, [st_rpm, st_tacho_hz, st_fuel, st_engine_h,
+                                st_fuel_spikes, st_coolant, st_exhaust, st_alt,
+                                st_tank, st_tank_ohm, st_al_d2, st_al_d3,
+                                st_volt_b]() {
     char v[24];
     float rpm = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
     snprintf(v, sizeof(v), "%.0f U/min", rpm);
@@ -694,6 +840,10 @@ void setup() {
     float fuel = (isnan(g_fuel_lph) || isinf(g_fuel_lph)) ? 0.0f : g_fuel_lph;
     snprintf(v, sizeof(v), "%.2f L/h", fuel);
     st_fuel->set(v);
+    snprintf(v, sizeof(v), "%.1f h%s", g_engine_h, g_engine_run ? " (läuft)" : "");
+    st_engine_h->set(v);
+    snprintf(v, sizeof(v), "%lu verworfen", (unsigned long)g_fuel_spikes);
+    st_fuel_spikes->set(v);
     if (disp_coolant > -200) {
       snprintf(v, sizeof(v), "%.1f °C", disp_coolant);
       st_coolant->set(v);
@@ -927,11 +1077,28 @@ void setup() {
       ->set_sort_order(3020);
   fuel_flow_hz->connect_to(fuel_flow_lph);
 
+  auto* fuel_plausibility = new FuelPlausibility();
+  ConfigItem(fuel_plausibility)
+      ->set_title("Kraftstoff-Plausibilitaet")
+      ->set_description(
+          "Verwirft unmoegliche Verbrauchswerte (Stoerimpulse am Eingang D1).")
+      ->set_sort_order(3025);
+
   // Sanitize the curve output: it can be NaN before the first valid reading,
   // which would poison the N2K fuel rate and make /api/data invalid JSON.
-  auto* fuel_flow_clean = new LambdaTransform<float, float>([](float lph) -> float {
-    return (isnan(lph) || isinf(lph)) ? 0.0f : lph;
-  });
+  // An implausible spike is dropped by holding the last good value — zeroing
+  // instead would punch a hole into the reading mid-run, and the next regular
+  // sample (every 500 ms) recovers on its own either way.
+  auto* fuel_flow_clean =
+      new LambdaTransform<float, float>([fuel_plausibility](float lph) -> float {
+        if (isnan(lph) || isinf(lph)) return 0.0f;
+        if (fuel_plausibility->max_lph > 0 && lph > fuel_plausibility->max_lph) {
+          g_fuel_spikes++;
+          return g_fuel_last_ok;
+        }
+        g_fuel_last_ok = lph;
+        return lph;
+      });
   fuel_flow_lph->connect_to(fuel_flow_clean);
 
 #ifdef ENABLE_NMEA2000_OUTPUT
@@ -949,6 +1116,59 @@ void setup() {
   fuel_flow_clean->connect_to(fuel_flow_m3s);
   fuel_flow_m3s->connect_to(
       new SKOutputFloat("propulsion.main.fuel.rate", "/Fuel Flow/SK Path"));
+#endif
+
+  ///////////////////////////////////////////////////////////////////
+  // Engine hour meter -> PGN 127489 (Engine Dynamic) total engine hours.
+
+  auto* engine_hours = new EngineHours();
+  ConfigItem(engine_hours)
+      ->set_title("Motorstunden")
+      ->set_description(
+          "Betriebsstundenzaehler. Zaehlt, solange der Kraftstoffverbrauch "
+          "ueber der Laufschwelle liegt.")
+      ->set_sort_order(3030);
+
+  // Tick on a 1 s timer rather than per fuel sample, so the count does not
+  // depend on the flow sensor's reporting rate. Flushing to flash on every
+  // tick would wear it out, so the accumulator is written when the engine
+  // stops and every kHoursSaveSeconds of running: a power cut while running
+  // loses at most that much (5 min = 0.08 h, below the gauge's 0.1 h step).
+  static const uint32_t kHoursSaveSeconds = 300;
+  event_loop()->onRepeat(1000, [engine_hours]() {
+    static bool was_running = false;
+    static uint32_t unsaved = 0;
+
+    float fuel = (isnan(g_fuel_lph) || isinf(g_fuel_lph)) ? 0.0f : g_fuel_lph;
+    bool running = fuel > engine_hours->threshold_lph;
+    if (running) {
+      engine_hours->run_seconds++;
+      unsaved++;
+    }
+    if (unsaved > 0 && ((was_running && !running) || unsaved >= kHoursSaveSeconds)) {
+      engine_hours->save();
+      unsaved = 0;
+    }
+    was_running = running;
+    g_engine_run = running;
+    g_engine_h = engine_hours->total_hours();
+  });
+
+#ifdef ENABLE_NMEA2000_OUTPUT
+  // PGN 127489 carries engine hours in seconds. Refresh every second, well
+  // inside the sender's 5 s input expiry, or the field would drop to N/A.
+  event_loop()->onRepeat(1000, [engine_hours, engine_dynamic_sender]() {
+    engine_dynamic_sender->total_engine_hours_->set(engine_hours->total_seconds());
+  });
+#endif
+
+#ifdef ENABLE_SIGNALK
+  // Signal K propulsion.main.runTime is the total run time in seconds.
+  auto* engine_hours_sk =
+      new SKOutputInt("propulsion.main.runTime", "/Engine Hours/SK Path");
+  event_loop()->onRepeat(10000, [engine_hours, engine_hours_sk]() {
+    engine_hours_sk->set((int)engine_hours->total_seconds());
+  });
 #endif
 
   ///////////////////////////////////////////////////////////////////
