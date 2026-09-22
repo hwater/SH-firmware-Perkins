@@ -61,6 +61,7 @@ static const uint8_t Taster_PIN = 0;
 #include "sensesp/net/networking.h"
 #include "sensesp_onewire/onewire_temperature.h"
 #include "sensesp/system/saveable.h"
+#include "sensesp/ui/ui_button.h"
 
 using namespace sensesp;
 using namespace halmet;
@@ -569,6 +570,44 @@ void setup() {
   // richtigen Namen vorgeben, bevor der Event-Loop die OTA-Initialisierung
   // anstoesst -- gleiche Loesung wie in SH-firmware-Achtern.
   ArduinoOTA.setHostname(SensESPBaseApp::get_hostname().c_str());
+
+  // ── Schaltflaechen auf der Control-Seite (SensESP 3.6.0) ────────────────
+  //
+  // "Eichpunkt festhalten": schreibt Geberwiderstand, Fuellstand und
+  // Betriebsstunden mit Zeitstempel ins Log. Beim Peilen gedrueckt, liefert
+  // er den exakt zugehoerigen Maschinenwert -- genau das fehlte der
+  // Eichreihe bisher, siehe docs/tank-eichtabelle.md. Nur lesend, daher
+  // ohne Rueckfrage.
+  UIButton::add("eichpunkt", "Eichpunkt festhalten (Tank)", false)
+      ->attach([]() {
+        ESP_LOGW("Eichpunkt",
+                 "EICHPUNKT t=%lu ms | Geber %.1f Ohm | Level %.2f %% | "
+                 "Betriebsstunden %.1f h",
+                 (unsigned long)millis(), g_tank_ohms,
+                 disp_tank >= 0 ? disp_tank * 100.0f : -1.0f, g_engine_h);
+      });
+
+  // "Signal K neu verbinden": wirft die bestehende Verbindung weg und
+  // laesst den Reconnect-Pfad sie neu aufbauen -- die weiche Variante zum
+  // harten Neustart des Wachhunds.
+  //
+  // restart() darf laut SensESP nur im Event-Loop laufen; UIButton-Observer
+  // tun das. Die zweite Auflage dort ist, nicht parallel zu einem laufenden
+  // Connect-Worker zu feuern, sonst kann ein lebender Client verwaisen.
+  // Deshalb die Waechterabfrage: nur anfassen, wenn eine Verbindung wirklich
+  // steht. Steht keine, laeuft der Reconnect ohnehin schon von selbst.
+  UIButton::add("sk_reconnect", "Signal K neu verbinden", true)
+      ->attach([]() {
+        auto ws = sensesp_app->get_ws_client();
+        if (ws && ws->is_connected()) {
+          ESP_LOGW("SK", "Reconnect von Hand ausgeloest");
+          ws->restart();
+        } else {
+          ESP_LOGW("SK",
+                   "Reconnect uebersprungen: keine stehende Verbindung, "
+                   "der Reconnect-Pfad arbeitet bereits");
+        }
+      });
 
   // Customize the hostname configuration page.
   auto hostname_ci = ConfigItemBase::get_config_item("/system/hostname");
