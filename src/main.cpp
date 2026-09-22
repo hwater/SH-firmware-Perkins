@@ -563,6 +563,13 @@ void setup() {
     }
   }
 
+  // SensESP::OTA ruft ArduinoOTA.begin() ohne setHostname() auf, daher
+  // landet mDNS sonst auf "esp32-<MAC>" und das in platformio.ini
+  // eingetragene upload_port = perkins.local laeuft ins Leere. Hier den
+  // richtigen Namen vorgeben, bevor der Event-Loop die OTA-Initialisierung
+  // anstoesst -- gleiche Loesung wie in SH-firmware-Achtern.
+  ArduinoOTA.setHostname(SensESPBaseApp::get_hostname().c_str());
+
   // Customize the hostname configuration page.
   auto hostname_ci = ConfigItemBase::get_config_item("/system/hostname");
   if (hostname_ci) {
