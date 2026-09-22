@@ -733,11 +733,12 @@ void setup() {
                                        3010, enable_signalk_output);
 
 #ifdef ENABLE_NMEA2000_OUTPUT
-  // Tank 1, instance 0. Capacity 200 liters. You can change the capacity
-  // in the web UI as well.
-  // EDIT: Make sure this matches your tank configuration above.
+  // Tank 1, instance 0. Capacity from kFuelTankCapacityLiters, the same
+  // constant the SignalK volume path uses -- do not hardcode a second number
+  // here. You can still change it at runtime in the web UI.
   N2kFluidLevelSender* tank_a1_sender = new N2kFluidLevelSender(
-      "/Tanks/Fuel/NMEA 2000", 0, N2kft_Fuel, 200, nmea2000);
+      "/Tanks/Fuel/NMEA 2000", 0, N2kft_Fuel,
+      halmet::kFuelTankCapacityLiters, nmea2000);
 
   ConfigItem(tank_a1_sender)
       ->set_title("Tank C NMEA 2000")

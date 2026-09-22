@@ -12,6 +12,17 @@ namespace halmet {
 // HALMET voltage divider scale factor
 const float kVoltageDividerScale = 33.3 / 3.3;
 
+// Fuel tank capacity in liters. Single source of truth: the SignalK volume
+// path and the NMEA 2000 fluid level sender must agree, otherwise the boat
+// reports two different tank sizes. Verified 2026-09-22 against a measured
+// 55 l refill (dipstick 10.5 -> 26.0 cm, currentLevel 24.3 -> 52.1 %).
+//
+// Both places are also editable at runtime in the web UI; the stored value
+// wins over this default. Until 2026-09-22 the stored "Fuel Tank Total
+// Volume" was 0.18 m3 while this default said 120 l and the N2K sender said
+// 200 l -- three different numbers, and SignalK reported 10 % too little.
+const float kFuelTankCapacityLiters = 200.;
+
 // resistance_out (optional): if non-null, the live sender resistance (ohms) is
 // mirrored here on every read, for display/diagnostics (e.g. tank calibration).
 sensesp::FloatProducer* ConnectTankSender(Adafruit_ADS1115* ads1115,

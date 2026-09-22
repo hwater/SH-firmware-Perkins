@@ -13,8 +13,9 @@ namespace halmet {
 // HALMET constant measurement current (A)
 const float kMeasurementCurrent = 0.01;
 
-// Default fuel tank size, in m3
-const float kTankDefaultSize = 120. / 1000;
+// Default fuel tank size, in m3 -- derived from kFuelTankCapacityLiters so it
+// cannot drift apart from the NMEA 2000 sender in main.cpp.
+const float kTankDefaultSize = kFuelTankCapacityLiters / 1000;
 
 sensesp::FloatProducer* ConnectTankSender(Adafruit_ADS1115* ads1115,
                                           int channel, const String& name,
