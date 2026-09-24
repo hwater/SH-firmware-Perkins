@@ -1259,7 +1259,7 @@ void setup() {
   // "/Temp/..." zusammengefasst, damit Sensor, Kalibrierung und Signal-K-Pfad je
   // Fuehler auf der Konfigurationsseite beieinander stehen (analog zu Achtern).
   auto addTemp = [&](const String& base, const String& title, const char* sk_path,
-                     int order, float* disp_target) {
+                     int order, float* disp_target, SKMetadata* meta = nullptr) {
     auto* t = new OneWireTemperature(dts, read_delay, base + "/oneWire");
     ConfigItem(t)
         ->set_title(title)
@@ -1272,7 +1272,7 @@ void setup() {
         ->set_description("Linear-Kalibrierung (Faktor/Offset) fuer " + title)
         ->set_sort_order(order + 1);
 
-    auto* sk = new SKOutputFloat(sk_path, base + "/skPath");
+    auto* sk = new SKOutputFloat(sk_path, base + "/skPath", meta);
     ConfigItem(sk)
         ->set_title(title + " Signal K Pfad")
         ->set_description("Signal K Pfad fuer " + title)
@@ -1288,8 +1288,11 @@ void setup() {
 
   addTemp("/Temp/Kuehlwasser", "Kuehlwasser Temperatur",
           "propulsion.0.coolantTemperature", 100, &disp_coolant);
-  addTemp("/Temp/Abgas", "Abgas Temperatur",
-          "propulsion.0.exhaustTemperature", 110, &disp_exhaust);
+  // signalk-server 2.33.0 ordnet den Wildcard-Pfad propulsion.*.exhaustTemperature
+  // faelschlich der Kategorie "volumeRate" statt "temperature" zu (Bug in dessen
+  // unitpreferences/default-categories.json); explizite Metadaten wie bei coolant.
+  addTemp("/Temp/Abgas", "Abgas Temperatur", "propulsion.0.exhaustTemperature", 110,
+          &disp_exhaust, new SKMetadata("K", "Abgas Temperatur"));
   addTemp("/Temp/Lichtmaschine12V", "12V-Lichtmaschine Temperatur",
           "electrical.alternators.12V.temperature", 120, &disp_alt);
 
