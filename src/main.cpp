@@ -1255,107 +1255,43 @@ void setup() {
   // To find valid Signal K Paths that fits your need you look at this link:
   // https://signalk.org/specification/1.4.0/doc/vesselsBranch.html
 
-  // Measure coolant temperature
-  auto coolant_temp =
-      new OneWireTemperature(dts, read_delay, "/coolantTemperature/oneWire");
+  // 1-Wire-Temperaturfuehler (DS18B20). Alle unter der gemeinsamen Config-Gruppe
+  // "/Temp/..." zusammengefasst, damit Sensor, Kalibrierung und Signal-K-Pfad je
+  // Fuehler auf der Konfigurationsseite beieinander stehen (analog zu Achtern).
+  auto addTemp = [&](const String& base, const String& title, const char* sk_path,
+                     int order, float* disp_target) {
+    auto* t = new OneWireTemperature(dts, read_delay, base + "/oneWire");
+    ConfigItem(t)
+        ->set_title(title)
+        ->set_description("DS18B20 1-Wire Sensor: " + title)
+        ->set_sort_order(order);
 
-  ConfigItem(coolant_temp)
-      ->set_title("Coolant Temperature")
-      ->set_description("Temperature of the engine coolant")
-      ->set_sort_order(100);
+    auto* cal = new Linear(1.0, 0.0, base + "/linear");
+    ConfigItem(cal)
+        ->set_title(title + " Kalibrierung")
+        ->set_description("Linear-Kalibrierung (Faktor/Offset) fuer " + title)
+        ->set_sort_order(order + 1);
 
-  auto coolant_temp_calibration =
-      new Linear(1.0, 0.0, "/coolantTemperature/linear");
+    auto* sk = new SKOutputFloat(sk_path, base + "/skPath");
+    ConfigItem(sk)
+        ->set_title(title + " Signal K Pfad")
+        ->set_description("Signal K Pfad fuer " + title)
+        ->set_sort_order(order + 2);
 
-  ConfigItem(coolant_temp_calibration)
-      ->set_title("Coolant Temperature Calibration")
-      ->set_description("Calibration for the coolant temperature sensor")
-      ->set_sort_order(110);
+    t->connect_to(cal)->connect_to(sk);
 
-  auto coolant_temp_sk_output = new SKOutputFloat(
-      "propulsion.mainEngine.coolantTemperature", "/coolantTemperature/skPath");
+    if (display_present && disp_target) {
+      t->connect_to(new LambdaConsumer<float>(
+          [disp_target](float value) { *disp_target = value - 273.15; }));
+    }
+  };
 
-  ConfigItem(coolant_temp_sk_output)
-      ->set_title("Coolant Temperature Signal K Path")
-      ->set_description("Signal K path for the coolant temperature")
-      ->set_sort_order(120);
-
-  coolant_temp->connect_to(coolant_temp_calibration)
-      ->connect_to(coolant_temp_sk_output);
-
-  if (display_present) {
-    coolant_temp->connect_to(new LambdaConsumer<float>([](float value) {
-      disp_coolant = value - 273.15;
-    }));
-  }
-
-  // Measure exhaust temperature
-  auto* exhaust_temp =
-      new OneWireTemperature(dts, read_delay, "/exhaustTemperature/oneWire");
-
-  ConfigItem(exhaust_temp)
-      ->set_title("Exhaust Temperature")
-      ->set_description("Temperature of the Exhaust")
-      ->set_sort_order(200);
-
-  auto* exhaust_temp_calibration =
-      new Linear(1.0, 0.0, "/exhaustTemperature/linear");
-
-  ConfigItem(exhaust_temp_calibration)
-      ->set_title("Exhaust Temperature Calibration")
-      ->set_description("Calibration for the Exhaust temperature sensor")
-      ->set_sort_order(210);
-
-  auto* exhaust_temp_sk_output = new SKOutputFloat(
-      "propulsion.mainEngine.exhaustTemperature", "/exhaustTemperature/skPath");
-
-  ConfigItem(exhaust_temp_sk_output)
-      ->set_title("Exhaust Temperature Signal K Path")
-      ->set_description("Signal K path for the Ehaust temperature")
-      ->set_sort_order(220);
-
-  exhaust_temp->connect_to(exhaust_temp_calibration)
-      ->connect_to(exhaust_temp_sk_output);
-
-  if (display_present) {
-    exhaust_temp->connect_to(new LambdaConsumer<float>([](float value) {
-      disp_exhaust = value - 273.15;
-    }));
-  }
-
-  // Measure temperature of 12v alternator
-  auto* alt_12v_temp =
-      new OneWireTemperature(dts, read_delay, "/12vAltTemperature/oneWire");
-
-  ConfigItem(alt_12v_temp)
-      ->set_title("12V-Alternator Temperature")
-      ->set_description("Temperature of the Alternator")
-      ->set_sort_order(300);
-
-  auto* alt_12v_temp_calibration =
-      new Linear(1.0, 0.0, "/12AltTemperature/linear");
-
-  ConfigItem(alt_12v_temp_calibration)
-      ->set_title("12V Alternator Temperature Calibration")
-      ->set_description("Calibration for the 12V-Alternator temperature sensor")
-      ->set_sort_order(310);
-
-  auto* alt_12v_temp_sk_output = new SKOutputFloat(
-      "electrical.alternators.12V.temperature", "/12vAltTemperature/skPath");
-
-  ConfigItem(alt_12v_temp_sk_output)
-      ->set_title("12V-Alternator Temperature Signal K Path")
-      ->set_description("Signal K path for the 12V Alternator temperature")
-      ->set_sort_order(320);
-
-  alt_12v_temp->connect_to(alt_12v_temp_calibration)
-      ->connect_to(alt_12v_temp_sk_output);
-
-  if (display_present) {
-    alt_12v_temp->connect_to(new LambdaConsumer<float>([](float value) {
-      disp_alt = value - 273.15;
-    }));
-  }
+  addTemp("/Temp/Kuehlwasser", "Kuehlwasser Temperatur",
+          "propulsion.mainEngine.coolantTemperature", 100, &disp_coolant);
+  addTemp("/Temp/Abgas", "Abgas Temperatur",
+          "propulsion.mainEngine.exhaustTemperature", 110, &disp_exhaust);
+  addTemp("/Temp/Lichtmaschine12V", "12V-Lichtmaschine Temperatur",
+          "electrical.alternators.12V.temperature", 120, &disp_alt);
 
   // Keep the latest fuel rate available for the /api/data endpoint.
   fuel_flow_clean->connect_to(
