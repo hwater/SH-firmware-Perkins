@@ -50,7 +50,7 @@ the sensor can saturate; treat readings near the top of the curve as a floor.
   (*Kraftstoff-Plausibilitaet*, default 35 L/h) are discarded as electrical
   spikes — the turbine sensor emits isolated spurious pulses.
 - **Outputs:** NMEA 2000 **PGN 127489** fuel rate → Signal K
-  `propulsion.main.fuel.rate`; the fuel rate also drives the **engine hour
+  `propulsion.0.fuel.rate`; the fuel rate also drives the **engine hour
   meter** (engine counts as running above the configurable *Laufschwelle*).
 
 ## Sources

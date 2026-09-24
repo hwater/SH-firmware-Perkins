@@ -62,7 +62,7 @@ a live web dashboard. Derived from the
 The engine counts as running while the fuel rate exceeds the configured
 threshold. The reading is the configured base ("Zaehlerstand") plus the runtime
 accumulated since, published as **PGN 127489** *Engine Total Hours of Operation*
-(seconds) and Signal K `propulsion.main.runTime` (seconds), and exposed on
+(seconds) and Signal K `propulsion.0.runTime` (seconds), and exposed on
 `/dash`, the Status page and `/api/data` (`engine_h` in hours, `engine_run`).
 
 The accumulator is written to flash when the engine stops and every 5 minutes of

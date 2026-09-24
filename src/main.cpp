@@ -1162,7 +1162,7 @@ void setup() {
       [](float lph) -> float { return lph / 3.6e6f; });
   fuel_flow_clean->connect_to(fuel_flow_m3s);
   fuel_flow_m3s->connect_to(
-      new SKOutputFloat("propulsion.main.fuel.rate", "/Fuel Flow/SK Path"));
+      new SKOutputFloat("propulsion.0.fuel.rate", "/Fuel Flow/SK Path"));
 #endif
 
   ///////////////////////////////////////////////////////////////////
@@ -1210,9 +1210,9 @@ void setup() {
 #endif
 
 #ifdef ENABLE_SIGNALK
-  // Signal K propulsion.main.runTime is the total run time in seconds.
+  // Signal K propulsion.0.runTime is the total run time in seconds.
   auto* engine_hours_sk =
-      new SKOutputInt("propulsion.main.runTime", "/Engine Hours/SK Path");
+      new SKOutputInt("propulsion.0.runTime", "/Engine Hours/SK Path");
   event_loop()->onRepeat(10000, [engine_hours, engine_hours_sk]() {
     engine_hours_sk->set((int)engine_hours->total_seconds());
   });
@@ -1287,9 +1287,9 @@ void setup() {
   };
 
   addTemp("/Temp/Kuehlwasser", "Kuehlwasser Temperatur",
-          "propulsion.mainEngine.coolantTemperature", 100, &disp_coolant);
+          "propulsion.0.coolantTemperature", 100, &disp_coolant);
   addTemp("/Temp/Abgas", "Abgas Temperatur",
-          "propulsion.mainEngine.exhaustTemperature", 110, &disp_exhaust);
+          "propulsion.0.exhaustTemperature", 110, &disp_exhaust);
   addTemp("/Temp/Lichtmaschine12V", "12V-Lichtmaschine Temperatur",
           "electrical.alternators.12V.temperature", 120, &disp_alt);
 
