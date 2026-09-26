@@ -81,7 +81,7 @@ struct ConfigItemPeek : public ConfigItemT<T> {
 class APShutoffConfig : public FileSystemSaveable {
  public:
   int shutoff_min = 3;
-  APShutoffConfig() : FileSystemSaveable("/ap/config") { load(); }
+  APShutoffConfig() : FileSystemSaveable("/System/Access-Point") { load(); }
   bool from_json(const JsonObject& obj) override {
     if (obj["shutoff_min"].is<int>()) shutoff_min = obj["shutoff_min"];
     return true;
@@ -983,7 +983,7 @@ void setup() {
   }
 
   // Read the voltage level of analog input A2
-  auto a2_voltage = new ADS1115VoltageInput(ads1115, 1, "/Voltage A2");
+  auto a2_voltage = new ADS1115VoltageInput(ads1115, 1, "/Analog/Voltage B");
 
   ConfigItem(a2_voltage)
       ->set_title("Analog Voltage B")
