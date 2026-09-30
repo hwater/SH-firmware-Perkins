@@ -47,6 +47,7 @@ static const uint8_t Taster_PIN = 0;
 #include "sensesp_app_builder.h"
 #include "secrets.h"  // AP_SSID, AP_PASS, OTA_PASSWORD (gitignored)
 #include "ws_reboot_watchdog.h"
+#include "sk_client_id.h"
 #define BUILDER_CLASS SensESPAppBuilder
 #else
 #include "sensesp_minimal_app_builder.h"
@@ -570,6 +571,9 @@ void setup() {
   // richtigen Namen vorgeben, bevor der Event-Loop die OTA-Initialisierung
   // anstoesst -- gleiche Loesung wie in SH-firmware-Achtern.
   ArduinoOTA.setHostname(SensESPBaseApp::get_hostname().c_str());
+
+  // In Signal K unter "perkins" statt einer UUID auftreten. Siehe sk_client_id.h.
+  pin_sk_client_id_to_hostname();
 
   // ── Schaltflaechen auf der Control-Seite (SensESP 3.6.0) ────────────────
   //

@@ -41,6 +41,16 @@ Engine‑monitor firmware for a Perkins marine engine on an **SH‑ESP32 Engine 
   `/dash` (Verbrauch card, with a läuft/aus pill), the Status page and
   `/api/data` (`engine_h`, `engine_run`). (`b02b051`)
 
+## Signal K
+- **Registers under its hostname, not a random UUID** (2026‑09‑30): SensESP
+  picks a UUID as Signal K `clientId` on its first access request, so the
+  device showed up in *Security → Devices* as e.g.
+  `eeac5ae3-6bf3-4acd-b33e-6fa4cb241e40`. The `clientId` is now pinned to
+  `perkins` (`src/sk_client_id.h`). On the first boot with this firmware the
+  old token is dropped and a new access request goes out — **approve it once
+  in the Signal K admin**, then delete the stale UUID entry. Source
+  priorities are keyed on `$source`, not on the `clientId`, and stay valid.
+
 ## Stability
 - **WiFi watchdog recovers from router outages** (v1.1.0): after a router
   outage on 2026‑07‑21 the WiFi stack hung for 21 h until a manual power
