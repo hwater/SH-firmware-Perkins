@@ -572,8 +572,8 @@ void setup() {
   // anstoesst -- gleiche Loesung wie in SH-firmware-Achtern.
   ArduinoOTA.setHostname(SensESPBaseApp::get_hostname().c_str());
 
-  // In Signal K unter "perkins" statt einer UUID auftreten. Siehe sk_client_id.h.
-  pin_sk_client_id_to_hostname();
+  // In Signal K unter fester, sprechender clientId auftreten. Siehe sk_client_id.h.
+  pin_sk_client_id("PerkinS-c112794e");
 
   // ── Schaltflaechen auf der Control-Seite (SensESP 3.6.0) ────────────────
   //

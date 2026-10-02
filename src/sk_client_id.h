@@ -38,11 +38,9 @@
  * setup(): der WebSocket-Client verbindet sich erst aus dem Event-Loop heraus,
  * die neue ID ist dann schon gespeichert.
  */
-inline void pin_sk_client_id_to_hostname() {
+inline void pin_sk_client_id(const String& want) {
   auto ws = sensesp::sensesp_app->get_ws_client();
   if (!ws) return;
-
-  const String want = sensesp::SensESPBaseApp::get_hostname();
   if (want.isEmpty()) return;
 
   JsonDocument doc;
@@ -60,4 +58,9 @@ inline void pin_sk_client_id_to_hostname() {
 
   Serial.printf("Signal-K-clientId: '%s' -> '%s' (Freigabe im SK-Admin noetig)\n",
                 have.c_str(), want.c_str());
+}
+
+/** clientId = Hostname (Standardfall). */
+inline void pin_sk_client_id_to_hostname() {
+  pin_sk_client_id(sensesp::SensESPBaseApp::get_hostname());
 }
