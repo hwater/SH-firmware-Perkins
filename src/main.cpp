@@ -46,6 +46,7 @@ static const uint8_t Taster_PIN = 0;
 #ifdef ENABLE_SIGNALK
 #include "sensesp_app_builder.h"
 #include "secrets.h"  // AP_SSID, AP_PASS, OTA_PASSWORD (gitignored)
+#include "heap_watchdog.h"
 #include "ws_reboot_watchdog.h"
 #include "sk_client_id.h"
 #define BUILDER_CLASS SensESPAppBuilder
@@ -235,7 +236,7 @@ bool alarm_states[4] = {false, false, false, false};
 
 // Display state — updated by sensor lambdas, rendered by page timer
 static uint8_t disp_page    = 0;
-static float   disp_rpm     = 0;
+static volatile float disp_rpm = 0;   // auch vom Heap-Wachhund gelesen
 static float   disp_tank    = -1;     // ratio 0-1, -1 = no data
 static float   disp_coolant = -300;   // °C, <-200 = no data
 static float   disp_exhaust = -300;
@@ -554,6 +555,21 @@ void setup() {
   // Neustart, wenn der Signal-K-WebSocket dauerhaft tot bleibt — auch dann,
   // wenn der WLAN-Stack "verbunden" behauptet. Siehe ws_reboot_watchdog.h.
   start_ws_reboot_watchdog();
+  // Netz unter dem WS-Wachhund: ist der Heap zerstueckelt, bekommt der
+  // WebSocket-Client keinen Puffer mehr und bleibt tot, ohne dass irgendetwas
+  // nach Fehler aussieht. Siehe heap_watchdog.h. Die Drehzahl geht als Zeiger
+  // mit, damit unter Fahrt nicht neu gestartet wird.
+  start_heap_watchdog(&disp_rpm);
+
+  // Den freien Heap mitschreiben. Ohne diesen Messwert bleibt jedes
+  // Speicherproblem eine Vermutung: Auf dem Geraet steht zwar eine Zahl, aber
+  // niemand sieht sie, und in Signal K/InfluxDB fehlte der Verlauf. Alle 30 s
+  // reicht voellig - ein Leck zeigt sich ueber Tage, nicht Sekunden.
+  auto* heap_sensor = new RepeatSensor<float>(30000, []() -> float {
+    return (float)ESP.getFreeHeap();
+  });
+  heap_sensor->connect_to(new SKOutputFloat(
+      "diagnostics.perkins.freeHeap", "/diagnostics/perkins/freeHeap"));
 
   // Set a lowercase hostname on first boot, and migrate the earlier uppercase
   // "PERKINS" -> "perkins" so the mDNS name matches the case-sensitive Origin
@@ -811,13 +827,15 @@ void setup() {
   });
 
   // CAN diagnostics via SJA1000 status/error registers.
-  auto* n2k_state_sensor = new RepeatSensor<String>(2000, []() -> String {
+  // 10 s statt 2 s: Der Zustandstext aendert sich im Betrieb so gut wie nie,
+  // und jeder Lauf legt ein String-Objekt an - 43.000 am Tag waren es.
+  auto* n2k_state_sensor = new RepeatSensor<String>(10000, []() -> String {
     return String(CanStateStr());
   });
-  auto* n2k_txerr_sensor = new RepeatSensor<float>(2000, []() -> float {
+  auto* n2k_txerr_sensor = new RepeatSensor<float>(10000, []() -> float {
     return (float)MODULE_CAN->TXERR.B.TXERR;
   });
-  auto* n2k_rxerr_sensor = new RepeatSensor<float>(2000, []() -> float {
+  auto* n2k_rxerr_sensor = new RepeatSensor<float>(10000, []() -> float {
     return (float)MODULE_CAN->RXERR.B.RXERR;
   });
   n2k_state_sensor->connect_to(
@@ -849,7 +867,14 @@ void setup() {
     g_can_txerr = (uint32_t)MODULE_CAN->TXERR.B.TXERR;
     g_can_rxerr = (uint32_t)MODULE_CAN->RXERR.B.RXERR;
 
-    st_can_state->set(String(g_can_state));
+    // Nur bei Aenderung: set() legt intern ein String-Objekt an, und der
+    // Zustand steht im Normalbetrieb tagelang auf demselben Wort.
+    static char letzter_can_state[24] = "";
+    if (strcmp(letzter_can_state, g_can_state) != 0) {
+      strncpy(letzter_can_state, g_can_state, sizeof(letzter_can_state) - 1);
+      letzter_can_state[sizeof(letzter_can_state) - 1] = '\0';
+      st_can_state->set(String(g_can_state));
+    }
     st_n2k_addr->set(g_n2k_addr);
     st_can_txpkt->set(g_can_tx);
     st_can_rxpkt->set(g_can_rx_pkts);
@@ -863,6 +888,26 @@ void setup() {
   // compact — mirrors the /dash readout. Not CAN-dependent, so it lives outside
   // the ENABLE_NMEA2000_OUTPUT guard. Values are formatted strings with units
   // and show "--" when the sensor has no data.
+  // Eine Statuszeile nur dann setzen, wenn sich ihr Text wirklich geaendert
+  // hat. set() legt intern ein String-Objekt an; bei dreizehn Zeilen im
+  // Sekundentakt waren das rund eine Million kurze Allokationen am Tag. Der
+  // ESP32 kompaktiert seinen Heap nicht - er zerstueckelt, bis kein
+  // zusammenhaengender WebSocket-Puffer mehr hineinpasst. Genau daran ist die
+  // Signal-K-Verbindung am 02.11.2026 erstickt (3836 Bytes frei vor dem
+  // Reset), waehrend Sensoren und Weboberflaeche munter weiterliefen.
+  // Bei stehendem Motor aendert sich fast nichts, der Unterschied ist also
+  // nicht klein, sondern der ganze Posten.
+#define SETZE(item, wert)                                   \
+  do {                                                      \
+    static char _letzter[28] = "";                          \
+    const char* _neu = (wert);                              \
+    if (strncmp(_letzter, _neu, sizeof(_letzter)) != 0) {    \
+      strncpy(_letzter, _neu, sizeof(_letzter) - 1);        \
+      _letzter[sizeof(_letzter) - 1] = '\0';                \
+      (item)->set(_neu);                                    \
+    }                                                       \
+  } while (0)
+
   auto* st_rpm     = new StatusPageItem<String>("Drehzahl", "--", "Sensoren", 10);
   auto* st_tacho_hz = new StatusPageItem<String>("Drehzahl Puls", "--", "Sensoren", 15);
   auto* st_fuel    = new StatusPageItem<String>("Kraftstoff", "--", "Sensoren", 20);
@@ -877,60 +922,60 @@ void setup() {
   auto* st_al_d3   = new StatusPageItem<String>("Alarm D3", "--", "Sensoren", 80);
   auto* st_volt_b  = new StatusPageItem<String>("Analog B", "--", "Sensoren", 90);
 
-  event_loop()->onRepeat(1000, [st_rpm, st_tacho_hz, st_fuel, st_engine_h,
+  event_loop()->onRepeat(5000, [st_rpm, st_tacho_hz, st_fuel, st_engine_h,
                                 st_fuel_spikes, st_coolant, st_exhaust, st_alt,
                                 st_tank, st_tank_ohm, st_al_d2, st_al_d3,
                                 st_volt_b]() {
     char v[24];
     float rpm = (isnan(disp_rpm) || isinf(disp_rpm)) ? 0.0f : disp_rpm;
     snprintf(v, sizeof(v), "%.0f U/min", rpm);
-    st_rpm->set(v);
+    SETZE(st_rpm, v);
     snprintf(v, sizeof(v), "%.1f Hz", g_tacho_hz);
-    st_tacho_hz->set(v);
+    SETZE(st_tacho_hz, v);
     float fuel = (isnan(g_fuel_lph) || isinf(g_fuel_lph)) ? 0.0f : g_fuel_lph;
     snprintf(v, sizeof(v), "%.2f L/h", fuel);
-    st_fuel->set(v);
+    SETZE(st_fuel, v);
     snprintf(v, sizeof(v), "%.1f h%s", g_engine_h, g_engine_run ? " (läuft)" : "");
-    st_engine_h->set(v);
+    SETZE(st_engine_h, v);
     snprintf(v, sizeof(v), "%lu verworfen", (unsigned long)g_fuel_spikes);
-    st_fuel_spikes->set(v);
+    SETZE(st_fuel_spikes, v);
     if (disp_coolant > -200) {
       snprintf(v, sizeof(v), "%.1f °C", disp_coolant);
-      st_coolant->set(v);
+      SETZE(st_coolant, v);
     } else {
-      st_coolant->set("--");
+      SETZE(st_coolant, "--");
     }
     if (disp_exhaust > -200) {
       snprintf(v, sizeof(v), "%.1f °C", disp_exhaust);
-      st_exhaust->set(v);
+      SETZE(st_exhaust, v);
     } else {
-      st_exhaust->set("--");
+      SETZE(st_exhaust, "--");
     }
     if (disp_alt > -200) {
       snprintf(v, sizeof(v), "%.1f °C", disp_alt);
-      st_alt->set(v);
+      SETZE(st_alt, v);
     } else {
-      st_alt->set("--");
+      SETZE(st_alt, "--");
     }
     if (disp_tank >= 0) {
       snprintf(v, sizeof(v), "%.0f %%", disp_tank * 100.0f);
-      st_tank->set(v);
+      SETZE(st_tank, v);
     } else {
-      st_tank->set("--");
+      SETZE(st_tank, "--");
     }
     if (g_tank_ohms >= 0) {
       snprintf(v, sizeof(v), "%.0f Ω", g_tank_ohms);
-      st_tank_ohm->set(v);
+      SETZE(st_tank_ohm, v);
     } else {
-      st_tank_ohm->set("--");
+      SETZE(st_tank_ohm, "--");
     }
-    st_al_d2->set(alarm_states[1] ? "ALARM" : "OK");
-    st_al_d3->set(alarm_states[2] ? "ALARM" : "OK");
+    SETZE(st_al_d2, alarm_states[1] ? "ALARM" : "OK");
+    SETZE(st_al_d3, alarm_states[2] ? "ALARM" : "OK");
     if (isnan(g_volt_b)) {
-      st_volt_b->set("--");
+      SETZE(st_volt_b, "--");
     } else {
       snprintf(v, sizeof(v), "%.2f V", g_volt_b);
-      st_volt_b->set(v);
+      SETZE(st_volt_b, v);
     }
   });
 
