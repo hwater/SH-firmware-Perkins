@@ -35,6 +35,7 @@ static const uint8_t Taster_PIN = 0;
 #include "sensesp/sensors/digital_input.h"
 #include "sensesp/sensors/sensor.h"
 #include "sensesp/signalk/signalk_output.h"
+#include "sensesp/signalk/signalk_value_listener.h"
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp/system/system_status_led.h"
 #include "sensesp/transforms/curveinterpolator.h"
@@ -242,6 +243,8 @@ static float   disp_coolant = -300;   // °C, <-200 = no data
 static float   disp_exhaust = -300;
 static float   disp_alt     = -300;
 static float   g_fuel_lph   = 0;      // current fuel rate, L/h
+static float   g_heater_lph = 0;      // Dieselheizung, geschaetzt (aus Signal K), L/h
+static uint32_t g_heater_at = 0;      // millis() des letzten Heizungswerts
 static float   g_tank_ohms  = -1;     // live fuel sender resistance (ohms), -1 = no data
 static float   g_tacho_hz   = 0;      // raw tacho input pulse frequency, Hz
 static float   g_fuel_hz    = 0;      // raw fuel-flow input pulse frequency (D1), Hz
@@ -1198,9 +1201,23 @@ void setup() {
   fuel_flow_lph->connect_to(fuel_flow_clean);
 
 #ifdef ENABLE_NMEA2000_OUTPUT
-  // PGN 127489 fuel rate is in L/h (float -> double for the sender).
+#ifdef ENABLE_SIGNALK
+  // Dieselheizung (dieselheizung-steuerung, 192.168.11.62) haengt am selben Tank: ihr
+  // geschaetzter Verbrauch (m^3/s) wird fuer den Garmin in PGN 127489 mitgezaehlt.
+  // propulsion.0.fuel.rate (SK), Motorstunden und Display bleiben reiner Motorverbrauch.
+  // Aelter als 2 min = Heizung aus/unbekannt -> 0.
+  auto* heater_rate = new SKValueListener<float>("electrical.heater.diesel.fuel.rate", 1000);
+  heater_rate->connect_to(new LambdaConsumer<float>([](float m3s) {
+    g_heater_lph = (isnan(m3s) || m3s < 0 || m3s > 1e-6f) ? 0 : m3s * 3.6e6f;
+    g_heater_at = millis();
+  }));
+#endif
+  // PGN 127489 fuel rate is in L/h (float -> double for the sender): Motor + Heizung.
   auto* fuel_lph_to_double = new LambdaTransform<float, double>(
-      [](float lph) -> double { return (double)lph; });
+      [](float lph) -> double {
+        float h = (g_heater_at && millis() - g_heater_at < 120000UL) ? g_heater_lph : 0;
+        return (double)(lph + h);
+      });
   fuel_flow_clean->connect_to(fuel_lph_to_double);
   fuel_lph_to_double->connect_to(engine_dynamic_sender->fuel_rate_);
 #endif
