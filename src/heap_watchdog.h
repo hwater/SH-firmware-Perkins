@@ -1,7 +1,7 @@
 // Neustart, bevor der Heap aufgebraucht ist - und ein Messwert, der zeigt, ob
 // er es wird.
 //
-// WARUM: Am 02.11.2026 stand der Perkins tagelang stumm an Signal K. Er war
+// WARUM: Am 02.11.2026 stand der Achtern tagelang stumm an Signal K. Er war
 // per Ping und HTTP erreichbar, seine Sensoren massen, die Weboberflaeche
 // antwortete - nur der WebSocket war tot. Der Grund stand in /api/info:
 //
@@ -15,15 +15,16 @@
 //
 // WAS ER TUT: alle 30 s den freien Heap ansehen. Faellt er unter die Schwelle,
 // einen GEORDNETEN Neustart ausloesen, solange das billig ist - also bei
-// stehendem Motor. Ein Neustart ist allemal besser als ein Geraet, das
+// stehender Welle. Ein Neustart ist allemal besser als ein Geraet, das
 // scheinbar laeuft und nichts mehr meldet.
 //
 // WAS ER NICHT TUT, und das ist der wichtigere Teil:
 //
-//   * Nicht bei laufendem Motor. Der Perkins ueberwacht Oeldruck und
+//   * Nicht bei drehender Welle. Die AchternSensorik ueberwacht Oeldruck, Wellentemperatur und
 //     Temperaturen; ein Neustart nimmt genau dann die Alarme weg, wenn sie
 //     gebraucht werden. Unter Fahrt wird nur gewarnt - die CAN-Pfade laufen
-//     ohnehin weiter, und nach dem Abstellen greift der Wachhund.
+//     ohnehin weiter (und an diesem Geraet haengt die Motorraum-
+//     Gasueberwachung), und nach dem Abstellen greift der Wachhund.
 //   * Nicht in den ersten Minuten nach dem Start. Waehrend WLAN, mDNS und der
 //     Webserver hochkommen, ist der Heap kurzzeitig knapp; wer da zuschlaegt,
 //     baut eine Reboot-Schleife.
@@ -37,6 +38,8 @@
 
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp_app.h"
+
+#include "reboot_reason.h"
 
 // Darunter wird neu gestartet (bei stehendem Motor).
 #ifndef HEAP_REBOOT_BYTES
@@ -54,7 +57,8 @@
 /**
  * @brief Startet den Heap-Wachhund. NACH get_app() aufrufen.
  *
- * @param rpm_quelle Zeiger auf die laufend aktualisierte Drehzahl. Bewusst ein
+ * @param rpm_quelle Zeiger auf die laufend aktualisierte Wellendrehzahl
+ *        (sd.rpm). Bewusst ein
  *        Zeiger und kein Wert: der Wachhund muss die Drehzahl im Moment der
  *        Entscheidung lesen, nicht die beim Einrichten. Darf nullptr sein -
  *        dann gilt der Motor als stehend (so verhaelt sich der Wachhund auf
@@ -85,12 +89,13 @@ inline void start_heap_watchdog(const volatile float* rpm_quelle = nullptr) {
       if (isnan(rpm) || isinf(rpm)) rpm = 0.0f;
     }
     if (rpm >= 1.0f) {
-      Serial.printf("Heap bei %lu Bytes, aber Motor laeuft (%.0f U/min) - "
+      Serial.printf("Heap bei %lu Bytes, aber die Welle dreht (%.0f U/min) - "
                     "kein Neustart, die Alarme bleiben an\n",
                     (unsigned long)frei, rpm);
       return;
     }
 
+    set_reboot_grund(REBOOT_HEAP);
     Serial.printf("Heap nur noch %lu Bytes frei - geordneter Neustart\n",
                   (unsigned long)frei);
     Serial.flush();

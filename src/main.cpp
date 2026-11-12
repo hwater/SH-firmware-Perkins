@@ -49,6 +49,7 @@ static const uint8_t Taster_PIN = 0;
 #include "secrets.h"  // AP_SSID, AP_PASS, OTA_PASSWORD (gitignored)
 #include "heap_watchdog.h"
 #include "ws_reboot_watchdog.h"
+#include "reboot_reason.h"
 #include "sk_client_id.h"
 #define BUILDER_CLASS SensESPAppBuilder
 #else
@@ -573,6 +574,12 @@ void setup() {
   });
   heap_sensor->connect_to(new SKOutputFloat(
       "diagnostics.perkins.freeHeap", "/diagnostics/perkins/freeHeap"));
+
+  // Warum das Geraet zuletzt neu startete, nach Signal K melden - damit
+  // "N mal neu gestartet" nicht mehr forensisch aus dem Heap-CSV geraten
+  // werden muss. Siehe reboot_reason.h.
+  start_reboot_reason_report("diagnostics.perkins.lastReset",
+                             "/diagnostics/perkins/lastReset");
 
   // Set a lowercase hostname on first boot, and migrate the earlier uppercase
   // "PERKINS" -> "perkins" so the mDNS name matches the case-sensitive Origin
